@@ -8,6 +8,20 @@ import type { Session } from "./types";
 
 export class ChatUnavailable extends Error {}
 
+const CODE_KEY = "common-threads:access-code";
+
+// A shared link like https://…/?code=XXXX stores the demo access code (see
+// DEMO_ACCESS_CODE in docs/HOSTING_PLAN.md) for later visits.
+function accessCode(): string {
+  try {
+    const fromLink = new URLSearchParams(window.location.search).get("code");
+    if (fromLink) localStorage.setItem(CODE_KEY, fromLink);
+    return fromLink ?? localStorage.getItem(CODE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export const requestTurn = (session: Session): Promise<ChatTurn> => post(interviewRequest(session), ChatTurnSchema);
 export const requestFinish = (session: Session): Promise<FinishTurn> => post(finishRequest(session), FinishTurnSchema);
 
@@ -16,7 +30,7 @@ async function post<S extends z.ZodType>(body: unknown, schema: S): Promise<z.in
   try {
     response = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Access-Code": accessCode() },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(17_000), // the server gives up at 15 s
     });

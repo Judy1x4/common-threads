@@ -1,10 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { clientKey, hasAccess, withinRateLimit } from "@/lib/guard";
 import { finishTurn, interviewTurn, ModelError } from "@/lib/model";
 import { ChatRequestSchema } from "@/lib/schemas";
 
 // One model call per user message ("interview") and one at Create ("finish").
 // The browser falls back on any non-200 response, so errors only need a short reason.
 export async function POST(request: Request) {
+  if (!hasAccess(request)) return Response.json({ error: "access code needed" }, { status: 401 });
+  if (!withinRateLimit(clientKey(request))) return Response.json({ error: "too many requests; try again soon" }, { status: 429 });
+
   const parsed = ChatRequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid request" }, { status: 400 });
 
