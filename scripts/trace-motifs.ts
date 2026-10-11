@@ -1,0 +1,98 @@
+// Trace the hand-drawn motif PNGs in assets/ into normalised SVG paths
+// (docs/IMPLEMENTATION_PLAN.md §4) and render a preview sheet to judge them.
+// Run: node scripts/trace-motifs.ts
+// Output: assets/traced/<name>.svg, assets/traced/motifs.json, assets/traced/preview.png
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import Jimp from "jimp";
+import potrace from "potrace";
+import svgpath from "svgpath";
+import { Resvg } from "@resvg/resvg-js";
+
+const SRC = "assets";
+const OUT = "assets/traced";
+const UPSCALE = 8; // smooth the 100 px sources before tracing
+const BOX = 100; // motif viewBox
+const MARGIN = 4;
+const INK = 128; // luminance below this counts as ink
+
+type Traced = { name: string; d: string };
+
+function inkBounds(image: Jimp) {
+  const { width, height, data } = image.bitmap;
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if ((data[i] + data[i + 1] + data[i + 2]) / 3 < INK) {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+  }
+  return { minX, minY, maxX: maxX + 1, maxY: maxY + 1 };
+}
+
+function tracePath(image: Jimp): Promise<string> {
+  const tracer = new potrace.Potrace({ threshold: INK, turdSize: 20 * UPSCALE, optTolerance: 0.4 });
+  return new Promise((resolve, reject) => {
+    tracer.loadImage(image, (err: Error | null) => {
+      if (err) return reject(err);
+      resolve(/ d="([^"]+)"/.exec(tracer.getPathTag())![1]);
+    });
+  });
+}
+
+async function traceFile(file: string): Promise<Traced> {
+  const image = await Jimp.read(`${SRC}/${file}`);
+  image.resize(image.bitmap.width * UPSCALE, image.bitmap.height * UPSCALE, Jimp.RESIZE_BICUBIC).blur(UPSCALE / 2);
+  const b = inkBounds(image);
+  const scale = (BOX - 2 * MARGIN) / Math.max(b.maxX - b.minX, b.maxY - b.minY);
+  const d = svgpath(await tracePath(image))
+    .translate(-(b.minX + b.maxX) / 2, -(b.minY + b.maxY) / 2)
+    .scale(scale)
+    .translate(BOX / 2, BOX / 2)
+    .round(2)
+    .toString();
+  return { name: file.replace(/\.png$/, ""), d };
+}
+
+// Preview: each motif at the on-screen sizes of large / medium / small motifs
+// (a 512 px tile shown at half size), plain and with a same-colour stroke that
+// thickens the lines.
+function previewSvg(motifs: Traced[]) {
+  const sizes = [55, 40, 27];
+  const thicken = [0, 4];
+  const cellW = sizes.reduce((a, s) => a + s + 10, 0) + 20;
+  const cellH = thicken.length * (sizes[0] + 10) + 20;
+  const cols = 3;
+  const rows = Math.ceil(motifs.length / cols);
+  let body = "";
+  motifs.forEach((m, n) => {
+    const ox = (n % cols) * cellW + 15;
+    const oy = Math.floor(n / cols) * cellH + 15;
+    thicken.forEach((t, r) => {
+      let x = ox;
+      for (const s of sizes) {
+        const y = oy + r * (sizes[0] + 10) + (sizes[0] - s) / 2;
+        body += `<g transform="translate(${x} ${y}) scale(${s / BOX})"><path d="${m.d}" fill="#294F6D" fill-rule="evenodd" stroke="#294F6D" stroke-width="${t}" stroke-linejoin="round"/></g>`;
+        x += s + 10;
+      }
+    });
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${cols * cellW + 15}" height="${rows * cellH + 15}"><rect width="100%" height="100%" fill="#F6F0E2"/>${body}</svg>`;
+}
+
+mkdirSync(OUT, { recursive: true });
+const files = readdirSync(SRC).filter((f) => f.endsWith(".png")).sort();
+const motifs: Traced[] = [];
+for (const file of files) {
+  const m = await traceFile(file);
+  motifs.push(m);
+  writeFileSync(
+    `${OUT}/${m.name}.svg`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${BOX} ${BOX}"><path d="${m.d}" fill="currentColor" fill-rule="evenodd"/></svg>\n`,
+  );
+}
+writeFileSync(`${OUT}/motifs.json`, JSON.stringify(Object.fromEntries(motifs.map((m) => [m.name, m.d])), null, 2) + "\n");
+writeFileSync(`${OUT}/preview.png`, new Resvg(previewSvg(motifs), { fitTo: { mode: "zoom", value: 2 } }).render().asPng());
+console.log(`Traced ${motifs.length} motifs into ${OUT}/ (preview: ${OUT}/preview.png)`);

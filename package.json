@@ -1,0 +1,20 @@
+{
+  "name": "common-threads",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:claude": "node --env-file=.env.local scripts/test-claude.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/node": "^26.6.5",
+    "potrace": "^2.1.8",
+    "svgpath": "^2.6.0",
+    "typescript": "^7.0.2"
+  }
+}
