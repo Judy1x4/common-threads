@@ -134,9 +134,9 @@ Each record stores an ID, SVG path data, bounds, suggestion tags, and permitted 
 
 **Artwork pipeline:**
 
-1. Draw each motif in one consistent style: black on white, one PNG per drawing in `assets/` (e.g. `wave-1.png`), not touching the edges.
-2. Run `node scripts/trace-motifs.ts`. It traces every PNG, centres it in a 100 × 100 viewBox as one `fill="currentColor"` path, and writes `assets/traced/`: one SVG per drawing, `motifs.json`, and `preview.png` showing each motif at its on-screen sizes.
-3. Choose one drawing per motif and copy its path into `lib/catalogue.ts`.
+1. Draw each motif in one consistent style: black on white, one PNG per drawing in `assets/raw/` (e.g. `wave-1.png`), not touching the edges.
+2. Set the chosen drawing per motif in `CHOSEN` at the top of `scripts/trace-motifs.ts`.
+3. Run `npm run trace`. It traces every PNG, centres it in a 100 × 100 viewBox as one `fill="currentColor"` path, and writes `assets/traced/` (one SVG per drawing, `motifs.json`, and `preview.png` showing each motif at its on-screen sizes) plus `lib/motif-paths.ts`, which the catalogue imports.
 
 Higher-resolution sources (about 1000 px) give smoother edges in the 2048 px PNG export. Start with placeholder shapes in the same format so the renderer is not blocked on artwork.
 
@@ -299,7 +299,7 @@ About five hours. Each step ends with something you can check; commit after each
 ### Step 1 — Scaffold (20 min)
 
 - Create the Next.js app (TypeScript, App Router, Tailwind); add `zod`.
-- Write `lib/types.ts` and `lib/catalogue.ts`: the four palettes, three sizes, and six placeholder motifs in the §4 format.
+- Write `lib/types.ts` and `lib/catalogue.ts`: the four palettes, three sizes, and the six motifs (traced drawings, or placeholders in the §4 format if the art is not ready).
 - **Done when** the dev server runs and types compile.
 
 ### Step 2 — Recipe and renderer (50 min)
@@ -310,7 +310,7 @@ About five hours. Each step ends with something you can check; commit after each
 
 ### Step 3 — Real artwork (40 min, less if pre-drawn)
 
-- Run the §4 pipeline for all six drawings; set permitted rotations.
+- Run the §4 pipeline for all six drawings if not done in Step 0; confirm permitted rotations.
 - Tune sizes, spacing, and colour rules in `/lab`; screenshot the best combinations for the presentation.
 - **Done when** the motifs share one drawing style and three contrasting samples are presentation-ready.
 

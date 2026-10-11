@@ -20,3 +20,9 @@ build/
 Thumbs.db
 .vscode/
 .idea/
+
+# Next.js and TypeScript generated files
+/out/
+next-env.d.ts
+*.tsbuildinfo
+.vercel
