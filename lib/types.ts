@@ -68,6 +68,7 @@ export type Session = {
   messages: Message[];
   profile: Profile;
   interview: Interview;
+  sampleId?: string; // set when the profile came from "Try sample"
   currentRecipe?: Recipe;
   previousRecipe?: Recipe;
   renderPlan?: RenderPlan;

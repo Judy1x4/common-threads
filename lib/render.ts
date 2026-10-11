@@ -148,10 +148,12 @@ function tileMotifs(recipe: Recipe, plan: RenderPlan, lineWeight: number) {
   return { defs, body, background: colors[0] };
 }
 
-// One self-contained 512 × 512 tile: the unit that repeats and is exported as PNG.
-export function renderTile(recipe: Recipe, plan: RenderPlan, options: RenderOptions = {}): string {
+// One self-contained 512 × 512 tile: the unit that repeats and is exported as
+// PNG. `size` sets the output pixel size; the drawing is the same.
+export function renderTile(recipe: Recipe, plan: RenderPlan, options: RenderOptions & { size?: number } = {}): string {
   const { defs, body, background } = tileMotifs(recipe, plan, options.lineWeight ?? DEFAULT_LINE_WEIGHT);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE_SIZE}" height="${TILE_SIZE}" viewBox="0 0 ${TILE_SIZE} ${TILE_SIZE}"><defs>${defs}</defs><rect width="${TILE_SIZE}" height="${TILE_SIZE}" fill="${background}"/>${body}</svg>`;
+  const size = options.size ?? TILE_SIZE;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${TILE_SIZE} ${TILE_SIZE}"><defs>${defs}</defs><rect width="${TILE_SIZE}" height="${TILE_SIZE}" fill="${background}"/>${body}</svg>`;
 }
 
 // The tile repeated cols × rows times in one vector image. One shared background
@@ -181,6 +183,36 @@ export function renderRepeat(
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs>${defs}<g id="tile">${body}</g></defs><rect width="${width}" height="${height}" fill="${background}"/>${tiles}${edges}</svg>`;
+}
+
+// A simple scarf mockup: the tile as an SVG pattern on a softly draped scarf
+// with fringed ends and fold shading.
+export function renderScarf(recipe: Recipe, plan: RenderPlan, options: RenderOptions = {}): string {
+  const { defs, body, background } = tileMotifs(recipe, plan, options.lineWeight ?? DEFAULT_LINE_WEIGHT);
+  const fringeColor = PALETTES[recipe.paletteId].colors[1];
+  const tileScale = 150 / TILE_SIZE; // about two tiles across the scarf
+  const outline = "M60 60C52 320 72 620 58 880L302 880C288 620 308 320 300 60Z";
+
+  let fringe = "";
+  for (let x = 64, i = 0; x <= 296; x += 8, i++) {
+    const sway = ((i % 3) - 1) * 2;
+    fringe += `M${x} 60L${x + sway} 22M${x} 880L${x - sway} 922`;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="960" viewBox="0 0 360 960"><defs>${defs}<pattern id="cloth" patternUnits="userSpaceOnUse" width="${TILE_SIZE}" height="${TILE_SIZE}" patternTransform="scale(${round(tileScale * 1000) / 1000})"><rect width="${TILE_SIZE}" height="${TILE_SIZE}" fill="${background}"/>${body}</pattern><linearGradient id="folds" x1="0" x2="1"><stop offset="0" stop-color="#000" stop-opacity="0.14"/><stop offset="0.2" stop-color="#000" stop-opacity="0"/><stop offset="0.45" stop-color="#fff" stop-opacity="0.12"/><stop offset="0.7" stop-color="#000" stop-opacity="0.07"/><stop offset="1" stop-color="#000" stop-opacity="0.16"/></linearGradient><filter id="shadow" x="-20%" y="-10%" width="140%" height="120%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-opacity="0.18"/></filter></defs><path d="${fringe}" stroke="${fringeColor}" stroke-width="2.5" stroke-linecap="round" opacity="0.85"/><g filter="url(#shadow)"><path d="${outline}" fill="url(#cloth)"/></g><path d="${outline}" fill="url(#folds)"/></svg>`;
+}
+
+// Render the tile at 2048 × 2048 in the browser and return it as a PNG.
+export async function exportPng(recipe: Recipe, plan: RenderPlan, size = 2048): Promise<Blob> {
+  const image = new Image();
+  image.src = svgDataUrl(renderTile(recipe, plan, { size }));
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  canvas.getContext("2d")?.drawImage(image, 0, 0, size, size);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("PNG export failed"))), "image/png"),
+  );
 }
 
 // For <img src> and downloads; keeps each SVG's ids isolated from the page.

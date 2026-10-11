@@ -102,3 +102,19 @@ function recipeReasons(profile: Profile, motifs: MotifChoice[], settings: Settin
   if (profile.scene) reasons.unshift(reason(`Inspired by “${profile.scene.value}”`, profile.scene));
   return reasons;
 }
+
+const SMALL_WORDS = new Set(["a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "with"]);
+
+// A short title for the result: the scene in title case ("a quiet beach" →
+// "Quiet Beach"), or the palette and main motif when there is no scene.
+export function patternTitle(profile: Profile, recipe: Recipe): string {
+  const scene = profile.scene?.value.trim().replace(/^(a|an|the)\s+/i, "");
+  if (scene) {
+    return scene
+      .split(/\s+/)
+      .map((word, i) => (i > 0 && SMALL_WORDS.has(word.toLowerCase()) ? word.toLowerCase() : capitalise(word)))
+      .join(" ");
+  }
+  const main = recipe.ingredients.find((ing) => ing.role === "main") ?? recipe.ingredients[0];
+  return `${PALETTES[recipe.paletteId].label} ${MOTIFS[main.id].label}`;
+}
