@@ -32,7 +32,7 @@ The prototype uses original art and visual preferences. Cultural-reference selec
 | Fixed motif sizes, independent of density | As a percentage of the cell, "small + spacious" (45% of 256 = 115 px) drew bigger motifs than "large + busy" (85% of 128 = 109 px) |
 | Scattered picks well-spaced points across the wrapped tile | Offsets inside cells have no room at large sizes, so scattered looked like the grid |
 | One precedence rule for corrections | Replaces separate correction, contradiction, and quote-check logic; review catches the rest |
-| The render plan stores colour indexes, not hex values or sizes | Palette and size edits cannot move any motif |
+| The render plan stores colour ranks, not hex values or sizes | Palette and size edits cannot move any motif, and the main motif keeps the strongest colour |
 
 ## 2. Guided conversation
 
@@ -98,7 +98,7 @@ type Profile = {
   motifScale?: Field<'small' | 'medium' | 'large'>
 }
 
-type Placement = { motifId: MotifId; x: number; y: number; rotation: number; colorIndex: 1 | 2 | 3 }
+type Placement = { motifId: MotifId; x: number; y: number; rotation: number; colorRank: 1 | 2 | 3 } // 1 = most contrast
 ```
 
 | Step | Runs in | Action |
@@ -161,14 +161,14 @@ Tags help the AI suggest ingredients and feed the keyword fallback. For example,
 
 Size and density are independent: large motifs at high density still fit a 128 px grid cell. Tune the three sizes in `/lab`.
 
-| Palette | Colours; first is the background |
+| Palette | Background, then inks from most to least contrast |
 | --- | --- |
-| Warm | `#F2E5CE` `#B96446` `#D5A24C` `#42372E` |
+| Warm | `#F2E5CE` `#42372E` `#B96446` `#D5A24C` |
 | Cool | `#F6F0E2` `#294F6D` `#769CAF` `#BFC9C7` |
-| Green | `#F3EADB` `#426451` `#93AA8D` `#C78562` |
-| Vivid | `#FFF2D8` `#CF4D64` `#247D8C` `#E8B13E` |
+| Green | `#F3EADB` `#426451` `#C78562` `#93AA8D` |
+| Vivid | `#FFF2D8` `#247D8C` `#CF4D64` `#E8B13E` |
 
-**Colours:** the main motif gets the palette colour with the most contrast against the background; accents get the others. Light colours such as cool's `#BFC9C7` nearly disappear on the background, so keep them for accents. With one motif, alternate the two strongest colours.
+**Colours:** each placement stores a colour rank, where rank 1 is the ink with the most contrast against the background. The main motif (or the most frequent) gets rank 1 and accents get ranks 2 and 3, so light colours such as cool's `#BFC9C7` stay on accents and every palette edit keeps the hierarchy. A lone motif uses ranks 1 and 2, split between the first and second half of the spread order (§5B), which gives a checkerboard on the grid.
 
 **Counts:** code removes exclusions and uses confirmed choices. Equal choices get weight 1 each; a main motif gets weight 3 and each accent weight 1. Allocate the density budget proportionally, round using largest remainders, and ensure each selected motif appears at least once. Store reasons and supporting message IDs.
 
@@ -198,11 +198,11 @@ Example: “Mostly waves, a few circles; blue and cream; small, spacious, scatte
 | --- | --- |
 | 1. Make a tile | Create one 512 × 512 SVG square; fill its background |
 | 2. Count placements | Density gives 4, 9, or 16 placements; grid uses a 2 × 2, 3 × 3, or 4 × 4 cell grid |
-| 3. Assign motifs | Expand ingredient counts into a list; shuffle it with a seeded generator (e.g. mulberry32) |
-| 4. Place them | Grid uses cell centres. Scattered tries ~10 seeded random points per motif and keeps the one farthest from those already placed, measuring distance across the wrapped edges |
-| 5. Assign style | Colour index by role; a rotation from the motif's permitted list |
+| 3. Order positions | Put the positions in spread order, so each is as far as possible from those before it (seeded with mulberry32) |
+| 4. Assign motifs | Grid uses cell centres. Scattered tries 40 seeded random points per motif and keeps the one farthest from those already placed, measuring distance across the wrapped edges. The rarest motifs take the first positions, so accents end up evenly spaced instead of clustered |
+| 5. Assign style | Colour rank by role; a rotation from the motif's permitted list |
 | 6. Handle boundaries | Draw every placement at all nine offsets (0 or ±512 on each axis); the tile's viewBox crops them, so opposite edges always match |
-| 7. Save the render plan | Store motif ID, x/y, rotation, and colour index for every logical placement |
+| 7. Save the render plan | Store motif ID, x/y, rotation, and colour rank for every logical placement |
 | 8. Preview/export | Repeat the tile in a 3 × 3 view and scarf shape; export the same tile as PNG |
 
 The render plan does not store hex colours or sizes; `renderTile` reads them from the recipe, so palette and size edits redraw the same positions. Offset copies do not increase recipe counts.
@@ -216,14 +216,14 @@ Use a shared palette, coordinated line weights, and tuned placement rules to mak
 | Function | Responsibility |
 | --- | --- |
 | `allocateCounts(ingredients, density)` | Weighted counts with largest remainders; at least one of each motif |
-| `buildRenderPlan(recipe)` | Resolve positions, rotations, and colour indexes with the seeded generator |
+| `buildRenderPlan(recipe)` | Resolve positions, rotations, and colour ranks with the seeded generator |
 | `renderTile(recipe, plan)` | Build a self-contained SVG string from local motif geometry, palette, and size |
 | `renderRepeat(tile)` | Fill a larger preview or the scarf shape with SVG `<pattern>` |
 | `exportPng(tile)` | Load the SVG into an image, draw it on a 2048 × 2048 canvas, export with `toBlob` |
 
 Keep motif geometry embedded in the SVG, so export needs no external asset fetches. A recipe, seed, and unchanged artwork/layout version reproduce the same result. Save version IDs alongside the recipe.
 
-The `/lab` page shows 6–8 hand-written sample recipes as 3 × 3 repeats, with a new-seed button and a toggle that outlines tile edges. Use it to tune sizes, spacing, and colour rules, and to take screenshots for the presentation.
+The `/lab` page shows eight sample profiles (`lib/samples.ts`) as 3 × 3 repeats, with a new-seed button, a line-weight slider, a toggle that outlines tile edges, and checks that counts match and the same seed reproduces the tile. Use it to tune sizes, spacing, and colour rules, and to take screenshots for the presentation. `npm run render:samples` writes the same repeats as PNGs to `assets/samples/`.
 
 Documentation: [SVG repeats](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/pattern), [canvas drawing](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/drawImage), [PNG export](https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob).
 

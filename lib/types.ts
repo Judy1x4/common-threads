@@ -58,9 +58,10 @@ export type Recipe = {
   artworkVersion: number;
 };
 
-// One logical motif in the tile. Hex colours and size are resolved from the
-// recipe at render time, so palette and size edits never move anything.
-export type Placement = { motifId: MotifId; x: number; y: number; rotation: number; colorIndex: 1 | 2 | 3 };
+// One logical motif in the tile. colorRank 1 is the palette ink with the most
+// contrast. Hex colours and size are resolved from the recipe at render time,
+// so palette and size edits never move anything.
+export type Placement = { motifId: MotifId; x: number; y: number; rotation: number; colorRank: 1 | 2 | 3 };
 export type RenderPlan = Placement[];
 
 export type Session = {

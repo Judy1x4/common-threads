@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MOTIF_BOX, MOTIFS, PALETTES } from "@/lib/catalogue";
 
 // Step 1 check: the catalogue loads in the app. Replaced by the chat in Step 4.
@@ -9,6 +10,7 @@ export default function Home() {
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Common Threads</h1>
         <p className="mt-2 text-foreground/70">Catalogue check: the artist&apos;s six motifs and four palettes.</p>
+        <Link href="/lab" className="mt-3 inline-block underline underline-offset-4">Open the pattern lab →</Link>
       </header>
 
       <section className="grid grid-cols-3 gap-3 sm:grid-cols-6">

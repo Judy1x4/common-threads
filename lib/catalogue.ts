@@ -27,6 +27,8 @@ export const MOTIFS: Record<MotifId, Motif> = {
   leaf: { id: "leaf", label: "Leaves", tags: ["plant", "organic", "nature", "garden", "forest"], rotations: [0, 180], path: MOTIF_PATHS.leaf },
 };
 
+// Inks are ordered by contrast against the background, so colour rank 1 is
+// always the strongest. Render plans store ranks, not hex values.
 export type Palette = {
   label: string;
   description: string; // colour names for the extraction prompt
@@ -34,10 +36,10 @@ export type Palette = {
 };
 
 export const PALETTES: Record<PaletteId, Palette> = {
-  warm: { label: "Warm", description: "cream, terracotta, ochre, brown", colors: ["#F2E5CE", "#B96446", "#D5A24C", "#42372E"] },
+  warm: { label: "Warm", description: "cream, brown, terracotta, ochre", colors: ["#F2E5CE", "#42372E", "#B96446", "#D5A24C"] },
   cool: { label: "Cool", description: "cream, navy, blue-grey, pale grey", colors: ["#F6F0E2", "#294F6D", "#769CAF", "#BFC9C7"] },
-  green: { label: "Green", description: "cream, forest, sage, clay", colors: ["#F3EADB", "#426451", "#93AA8D", "#C78562"] },
-  vivid: { label: "Vivid", description: "cream, raspberry, teal, mustard", colors: ["#FFF2D8", "#CF4D64", "#247D8C", "#E8B13E"] },
+  green: { label: "Green", description: "cream, forest, clay, sage", colors: ["#F3EADB", "#426451", "#C78562", "#93AA8D"] },
+  vivid: { label: "Vivid", description: "cream, teal, raspberry, mustard", colors: ["#FFF2D8", "#247D8C", "#CF4D64", "#E8B13E"] },
 };
 
 export const LAYOUTS: Record<LayoutId, { label: string }> = {

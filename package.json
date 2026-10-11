@@ -10,7 +10,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "trace": "node scripts/trace-motifs.ts"
+    "trace": "node scripts/trace-motifs.ts",
+    "render:samples": "tsx scripts/render-samples.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
@@ -30,6 +31,7 @@
     "potrace": "^2.1.8",
     "svgpath": "^2.6.0",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   }
 }

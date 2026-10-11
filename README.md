@@ -9,7 +9,7 @@ See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the idea and [docs/IMPLEMEN
 ```bash
 npm install
 cp .env.example .env.local   # then add your ANTHROPIC_API_KEY
-npm run dev                  # http://localhost:3000
+npm run dev                  # http://localhost:3000 (pattern lab: /lab)
 ```
 
 | Command | What it does |
@@ -17,6 +17,7 @@ npm run dev                  # http://localhost:3000
 | `npm run dev` | Start the app with hot reload |
 | `npm run test:claude` | Check the API key and the structured profile extraction |
 | `npm run trace` | Trace the drawings in `assets/raw/` and regenerate `lib/motif-paths.ts` |
+| `npm run render:samples` | Render the sample patterns as PNGs in `assets/samples/` (add `-- --edges` to mark tile edges) |
 | `npm run typecheck` | Generate Next.js route types and run TypeScript |
 | `npm run lint` | Run ESLint |
 | `npm run build` | Production build |
