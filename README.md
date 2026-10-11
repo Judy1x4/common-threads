@@ -16,6 +16,7 @@ npm run dev                  # http://localhost:3000 (pattern lab: /lab)
 | --- | --- |
 | `npm run dev` | Start the app with hot reload |
 | `npm run test:claude` | Check the API key and the structured profile extraction |
+| `npm run test:chat` | Play sample conversations against Claude and check the replies (calls the API) |
 | `npm run trace` | Trace the drawings in `assets/raw/` and regenerate `lib/motif-paths.ts` |
 | `npm run render:samples` | Render the sample patterns as PNGs in `assets/samples/` (add `-- --edges` to mark tile edges) |
 | `npm run check:interview` | Check the conversation logic (merge, next question, keywords, chips) |

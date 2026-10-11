@@ -34,8 +34,9 @@ export type Profile = {
   motifScale?: Field<MotifScale>;
 };
 
-// An assistant message that asks about a topic carries it, so the chat can show that topic's chips.
-export type Message = { id: string; role: "user" | "assistant"; text: string; topic?: Topic };
+// An assistant message that asks about a topic carries it, plus the model's
+// example answers; without them, the chat shows that topic's fixed chips.
+export type Message = { id: string; role: "user" | "assistant"; text: string; topic?: Topic; suggestions?: string[] };
 
 // What one user message says, from keyword matching or the model (same shape as
 // the Step 0 test schema). "suggested" means inferred, e.g. beach → wave.

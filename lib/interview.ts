@@ -1,9 +1,12 @@
-// The guided conversation (docs/IMPLEMENTATION_PLAN.md §2 and §3). The model
-// (or keyword matching) only reads answers; this code merges them, chooses the
-// next question, and words it from a template.
+// The guided conversation (docs/CONVERSATION_PLAN.md §3; IMPLEMENTATION_PLAN.md
+// §2–3). The model writes each reply and reads the answer; this code merges the
+// answer, checks the model's next topic, and falls back to templates and keyword
+// matching when the model is unavailable.
 import { LAYOUTS, MOTIFS, PALETTES } from "./catalogue";
+import type { ChatTurn, InterviewRequest } from "./schemas";
 import type {
-  Density, Extraction, Field, LayoutId, MotifChoice, MotifId, MotifScale, PaletteId, Profile, Session, Stated, Topic,
+  Density, Extraction, Field, Interview, LayoutId, Message, MotifChoice, MotifId, MotifScale, PaletteId, Profile, Session,
+  Stated, Topic,
 } from "./types";
 import { MOTIF_IDS, TOPICS } from "./types";
 
@@ -18,8 +21,9 @@ export const QUESTIONS: Record<Topic, string> = {
   detail: "Small and spacious, or large and busy?",
 };
 
-const OPENER = "Hi! I'll design a repeating textile pattern from your answers, using an artist's hand-drawn motifs.";
-const REVIEW_MESSAGE = "That's everything I need. Check your choices, then create your pattern.";
+export const OPENING_QUESTION = "Think of a place or moment you'd like to carry with you. What do you see there?";
+const OPENING_SUGGESTIONS = ["A quiet beach at dawn", "My grandmother's garden in autumn", "A busy night market"];
+const READY_MESSAGE = "I have everything I need. Create your pattern whenever you're ready.";
 
 export function emptyExtraction(): Extraction {
   return {
@@ -28,8 +32,8 @@ export function emptyExtraction(): Extraction {
   };
 }
 
-export function openingMessage() {
-  return { id: "m0", role: "assistant" as const, text: `${OPENER} ${QUESTIONS.scene}`, topic: "scene" as const };
+export function openingMessage(): Message {
+  return { id: "m0", role: "assistant", text: OPENING_QUESTION, topic: "scene", suggestions: OPENING_SUGGESTIONS };
 }
 
 // ---------------------------------------------------------------------------
@@ -102,14 +106,40 @@ export function answeredTopics(profile: Profile): Topic[] {
   return TOPICS.filter((t) => answered[t]);
 }
 
-export type NextStep = { kind: "ask"; topic: Topic } | { kind: "review" };
+// The pattern needs these; a suggestion alone does not settle them.
+const REQUIRED: Topic[] = ["shapes", "colours", "arrangement"];
+
+// Required topics settle on an explicit answer; scene and detail on any value.
+function settledTopics(profile: Profile): Topic[] {
+  const explicit = (field: { origin: string } | undefined) => field?.origin === "explicit";
+  const settled: Record<Topic, boolean> = {
+    scene: !!profile.scene,
+    shapes: explicit(profile.motifs) && !!profile.motifs?.value.length,
+    colours: explicit(profile.paletteId),
+    arrangement: explicit(profile.layoutId),
+    detail: !!(profile.density || profile.motifScale),
+  };
+  return TOPICS.filter((t) => settled[t]);
+}
+
+// Topics still worth a question, in order: not settled or skipped, and asked
+// fewer than twice (required) or never (optional), within six questions.
+export function openTopics(session: Pick<Session, "profile" | "interview">): Topic[] {
+  const { askedTopics, skippedTopics, questionCount } = session.interview;
+  if (questionCount >= MAX_QUESTIONS) return [];
+  const settled = settledTopics(session.profile);
+  const timesAsked = (t: Topic) => askedTopics.filter((a) => a === t).length;
+  return TOPICS.filter(
+    (t) => !settled.includes(t) && !skippedTopics.includes(t) && timesAsked(t) < (REQUIRED.includes(t) ? 2 : 1),
+  );
+}
+
+// "ready" means nothing is open: the chat invites the user to create.
+export type NextStep = { kind: "ask"; topic: Topic } | { kind: "ready" };
 
 export function nextStep(session: Pick<Session, "profile" | "interview">): NextStep {
-  const { askedTopics, skippedTopics, questionCount } = session.interview;
-  if (questionCount >= MAX_QUESTIONS) return { kind: "review" };
-  const answered = answeredTopics(session.profile);
-  const topic = TOPICS.find((t) => !answered.includes(t) && !skippedTopics.includes(t) && !askedTopics.includes(t));
-  return topic ? { kind: "ask", topic } : { kind: "review" };
+  const [topic] = openTopics(session);
+  return topic ? { kind: "ask", topic } : { kind: "ready" };
 }
 
 export function currentTopic(session: Session): Topic | undefined {
@@ -168,23 +198,64 @@ export function addUserMessage(session: Session, text: string): [Session, string
   return [{ ...session, messages: [...session.messages, { id, role: "user", text }] }, id];
 }
 
-// Apply what the latest user message said, then ask the next question or move to review.
-export function applyExtraction(session: Session, e: Extraction, userMessageId: string): Session {
-  const profile = mergeProfile(session.profile, e, userMessageId);
-  let interview = { ...session.interview, skippedTopics: [...new Set([...session.interview.skippedTopics, ...e.skippedTopics])] };
-  const step = nextStep({ profile, interview });
+function merged(session: Session, e: Extraction, userMessageId: string): { profile: Profile; interview: Interview } {
+  return {
+    profile: mergeProfile(session.profile, e, userMessageId),
+    interview: { ...session.interview, skippedTopics: [...new Set([...session.interview.skippedTopics, ...e.skippedTopics])] },
+  };
+}
+
+type Reply = { text: string; topic?: Topic; suggestions?: string[] };
+
+// The fallback reply: a summary of what was understood plus the template question.
+function templateReply(e: Extraction, step: NextStep): Reply {
   const lead = [acknowledge(e), unsupportedNote(e.unsupportedShapes)].filter(Boolean).join(" ");
+  return step.kind === "ask" ? { text: `${lead} ${QUESTIONS[step.topic]}`, topic: step.topic } : { text: `${lead} ${READY_MESSAGE}` };
+}
 
-  const reply =
-    step.kind === "ask"
-      ? { id: messageId(session), role: "assistant" as const, text: `${lead} ${QUESTIONS[step.topic]}`, topic: step.topic }
-      : { id: messageId(session), role: "assistant" as const, text: `${lead} ${REVIEW_MESSAGE}` };
-  interview =
-    step.kind === "ask"
-      ? { ...interview, askedTopics: [...interview.askedTopics, step.topic], questionCount: interview.questionCount + 1 }
-      : { ...interview, phase: "REVIEW" };
+function withReply(session: Session, profile: Profile, interview: Interview, reply: Reply): Session {
+  const message: Message = { id: messageId(session), role: "assistant", text: reply.text };
+  if (reply.topic) message.topic = reply.topic;
+  if (reply.suggestions?.length) message.suggestions = reply.suggestions;
+  const next = reply.topic
+    ? { ...interview, askedTopics: [...interview.askedTopics, reply.topic], questionCount: interview.questionCount + 1 }
+    : interview;
+  return { ...session, profile, interview: next, messages: [...session.messages, message] };
+}
 
-  return { ...session, profile, interview, messages: [...session.messages, reply] };
+// Keyword or chip path: apply the answer, then ask the template question.
+export function applyExtraction(session: Session, e: Extraction, userMessageId: string): Session {
+  const { profile, interview } = merged(session, e, userMessageId);
+  return withReply(session, profile, interview, templateReply(e, nextStep({ profile, interview })));
+}
+
+// Model path: keep the model's reply if it asks about a topic that is still open
+// after the merge (or asks nothing when nothing is open); otherwise use the template.
+export function applyModelTurn(session: Session, turn: ChatTurn, userMessageId: string): Session {
+  const e: Extraction = { ...turn.extraction, acknowledgement: "" };
+  const { profile, interview } = merged(session, e, userMessageId);
+  const step = nextStep({ profile, interview });
+  const fits = turn.askedTopic ? openTopics({ profile, interview }).includes(turn.askedTopic) : step.kind === "ready";
+  const reply = fits
+    ? { text: turn.reply, topic: turn.askedTopic ?? undefined, suggestions: turn.askedTopic ? turn.suggestions.slice(0, 3) : [] }
+    : step.kind === "ready"
+      ? { text: `Lovely. ${READY_MESSAGE}` } // the model asked about a closed topic; code says ready
+      : templateReply(e, step);
+  return withReply(session, profile, interview, reply);
+}
+
+// What /api/chat needs: recent history from the first user message, the topics
+// open before the latest message, and the current profile.
+export function interviewRequest(session: Session): InterviewRequest {
+  const firstUser = session.messages.findIndex((m) => m.role === "user");
+  const history = session.messages.slice(firstUser).slice(-12).map((m) => ({ role: m.role, text: m.text.slice(0, 1000) }));
+  return {
+    mode: "interview",
+    messages: history.slice(history.findIndex((m) => m.role === "user")),
+    profile: session.profile,
+    openTopics: openTopics(session),
+    questionCount: session.interview.questionCount,
+  };
 }
 
 export function takeTurn(session: Session, text: string, e: Extraction): Session {
@@ -235,11 +306,12 @@ const MOTIF_WORDS: Record<MotifId, { names: string[]; hints: string[] }> = {
   leaf: { names: ["leaf", "leaves", "leafy"], hints: ["plant", "plants", "garden", "forest", "tree", "trees", "nature", "botanical", "jungle", "rainforest"] },
 };
 
+// Colour words the user says are explicit; moods and scenes are suggestions.
 const PALETTE_WORDS: Record<PaletteId, { names: string[]; hints: string[] }> = {
-  warm: { names: ["warm", "warmer"], hints: ["red", "orange", "terracotta", "brown", "ochre", "rust", "earthy", "autumn", "sunset", "golden"] },
-  cool: { names: ["cool", "cooler"], hints: ["blue", "blues", "navy", "grey", "gray", "cream", "silver", "icy", "pale"] },
-  green: { names: ["green", "greens"], hints: ["sage", "olive", "moss", "mint", "emerald"] },
-  vivid: { names: ["vivid", "bright", "colourful", "colorful", "vibrant", "bold"], hints: ["pink", "teal", "yellow", "mustard", "raspberry", "magenta", "neon"] },
+  warm: { names: ["warm", "warmer", "red", "orange", "terracotta", "brown", "ochre", "rust", "golden", "gold"], hints: ["earthy", "autumn", "sunset", "cosy", "cozy"] },
+  cool: { names: ["cool", "cooler", "blue", "blues", "navy", "grey", "gray", "silver"], hints: ["cream", "icy", "pale", "misty", "winter"] },
+  green: { names: ["green", "greens", "sage", "olive", "moss", "mint", "emerald"], hints: ["spring", "fresh"] },
+  vivid: { names: ["vivid", "bright", "colourful", "colorful", "vibrant", "pink", "teal", "yellow", "mustard", "raspberry", "magenta"], hints: ["bold", "neon", "festive", "carnival"] },
 };
 
 const LAYOUT_WORDS: Record<LayoutId, string[]> = {

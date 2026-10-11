@@ -1,6 +1,6 @@
 // Checks the conversation logic with keyword matching only (Step 5 "done when").
 // Run: npm run check:interview
-import { chipsFor, keywordExtract, takeTurn, currentTopic } from "../lib/interview";
+import { applyModelTurn, addUserMessage, chipsFor, currentTopic, emptyExtraction, keywordExtract, nextStep, takeTurn } from "../lib/interview";
 import { missingChoices, profileToRecipe } from "../lib/recipe";
 import { emptySession } from "../lib/session";
 import type { Session } from "../lib/types";
@@ -24,23 +24,24 @@ s = say(s, "A quiet beach. Mostly small waves, a few circles. Blue and cream.");
 const p = s.profile;
 check("scene from the first sentence", p.scene?.value === "A quiet beach", p.scene);
 check("waves main, circles accent (explicit)", JSON.stringify(p.motifs?.value) === '[{"id":"wave","role":"main"},{"id":"circle","role":"accent"}]' && p.motifs?.origin === "explicit", p.motifs);
-check("blue and cream → cool (suggested)", p.paletteId?.value === "cool" && p.paletteId.origin === "suggested", p.paletteId);
+check("blue and cream → cool (colour words are explicit)", p.paletteId?.value === "cool" && p.paletteId.origin === "explicit", p.paletteId);
 check("small motifs (explicit)", p.motifScale?.value === "small" && p.motifScale.origin === "explicit", p.motifScale);
 check("quiet → low density (suggested)", p.density?.value === "low" && p.density.origin === "suggested", p.density);
 check("asks only the missing arrangement question", currentTopic(s) === "arrangement", lastReply(s));
 s = say(s, "Scattered.");
-check("scattered layout, then review", s.profile.layoutId?.value === "scattered" && s.interview.phase === "REVIEW", s.interview);
+check("scattered layout, then ready to create in the chat", s.profile.layoutId?.value === "scattered" && nextStep(s).kind === "ready" && s.interview.phase === "INTERVIEW", s.interview);
 check("ready to create", missingChoices(s.profile).length === 0 && profileToRecipe(s.profile, 1).ingredients.length === 2);
 for (const m of s.messages) console.log(`   ${m.role === "user" ? "You" : "Bot"}: ${m.text}`);
 
 // 2. Corrections and precedence.
 console.log("\nCorrections");
-s = say(emptySession(), "Something by the sea, in blue");
-check("sea → wave suggested, blue → cool suggested", s.profile.motifs?.origin === "suggested" && s.profile.paletteId?.origin === "suggested", s.profile);
+s = say(emptySession(), "Something by the sea at sunset");
+check("sea → wave suggested, sunset → warm suggested", s.profile.motifs?.origin === "suggested" && s.profile.paletteId?.value === "warm" && s.profile.paletteId.origin === "suggested", s.profile);
+check("a suggestion alone leaves shapes open", currentTopic(s) === "shapes", s.interview);
 s = say(s, "Actually green please, with circles");
-check("explicit green replaces suggested cool", s.profile.paletteId?.value === "green" && s.profile.paletteId.origin === "explicit");
+check("explicit green replaces suggested warm", s.profile.paletteId?.value === "green" && s.profile.paletteId.origin === "explicit");
 check("named circles replace the suggested waves", JSON.stringify(s.profile.motifs?.value) === '[{"id":"circle"}]', s.profile.motifs);
-s = say(s, "maybe something blue and watery");
+s = say(s, "maybe something like the sea at sunset");
 check("a later suggestion does not override explicit choices", s.profile.paletteId?.value === "green" && s.profile.motifs?.value[0].id === "circle");
 s = say(s, "use leaves instead of circles");
 check("replacement: leaves in, circles excluded", JSON.stringify(s.profile.motifs?.value) === '[{"id":"leaf"}]' && s.profile.excludedIngredientIds.includes("circle"), s.profile);
@@ -55,8 +56,8 @@ check("closest motifs are suggested, not chosen", s.profile.motifs?.origin === "
 
 console.log("\nUnclear answers");
 s = emptySession();
-for (let i = 0; i < 6 && s.interview.phase === "INTERVIEW"; i++) s = say(s, "hmm");
-check("each topic is asked once, then review", s.interview.phase === "REVIEW" && s.interview.questionCount <= 6, s.interview);
+for (let i = 0; i < 6 && nextStep(s).kind === "ask"; i++) s = say(s, "hmm");
+check("unanswered topics are asked at most twice, within six questions", nextStep(s).kind === "ready" && s.interview.questionCount <= 6, s.interview);
 check("review shows what is still needed", missingChoices(s.profile).join(",") === "shapes,colours,arrangement");
 
 // 4. Chips set values directly.
@@ -71,8 +72,25 @@ s = chipTurn(s, "Arches");
 s = chipTurn(s, "Warm");
 s = chipTurn(s, "Regular");
 s = chipTurn(s, "Large and busy");
-check("chips alone reach review", s.interview.phase === "REVIEW" && missingChoices(s.profile).length === 0, s.profile);
+check("chips alone reach ready", nextStep(s).kind === "ready" && missingChoices(s.profile).length === 0, s.profile);
 check("chip values are explicit", s.profile.density?.value === "high" && s.profile.density.origin === "explicit");
+
+// 5. Model turns: code keeps the model's question only if its topic is still open.
+console.log("\nModel turns (no API call)");
+const modelTurn = (session: Session, text: string, askedTopic: Parameters<typeof applyModelTurn>[1]["askedTopic"], extraction = {}) => {
+  const [withMessage, id] = addUserMessage(session, text);
+  const { acknowledgement: _unused, ...base } = emptyExtraction();
+  void _unused;
+  return applyModelTurn(withMessage, { extraction: { ...base, ...extraction }, reply: "Model reply?", askedTopic, suggestions: ["a", "b", "c", "d"] }, id);
+};
+s = modelTurn(emptySession(), "a quiet beach", "shapes", { scene: "a quiet beach" });
+check("an open topic keeps the model's reply and suggestions", lastReply(s) === "Model reply?" && s.messages.at(-1)!.suggestions?.length === 3 && currentTopic(s) === "shapes", s.messages.at(-1));
+s = modelTurn(s, "waves", "shapes", { motifs: [{ id: "wave", role: "equal", origin: "explicit" }] });
+check("a topic that is no longer open falls back to the template", lastReply(s).endsWith("What colours would you like?") && currentTopic(s) === "colours", lastReply(s));
+s = modelTurn(s, "blue", null, { paletteId: { value: "cool", origin: "explicit" } });
+check("'ready' while topics remain falls back to the next question", currentTopic(s) === "arrangement", lastReply(s));
+s = modelTurn(s, "I love the colours", "arrangement");
+check("an unanswered required topic can be asked a second time", lastReply(s) === "Model reply?" && currentTopic(s) === "arrangement", s.interview);
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exit(failures ? 1 : 0);

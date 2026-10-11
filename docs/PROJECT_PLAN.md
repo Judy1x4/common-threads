@@ -19,14 +19,14 @@ The project connects my fine-art practice with full-stack engineering. Users cho
 
 | Step | Example | App behaviour |
 | --- | --- | --- |
-| 1. Chat | “A quiet beach. Mostly small waves, a few circles. Blue and cream.” | Extract the scene, shapes, size, emphasis, and colours |
-| 2. Follow-up | “Regularly arranged or scattered?” → “Scattered.” | Ask only about missing choices, one question at a time |
-| 3. Review | Waves as the main shape; circles as accents; cool palette; small; spacious; scattered | Let the user correct preferences and accept suggestions/defaults |
-| 4. Create | View the textile pattern and scarf preview | Build a recipe and compose the artwork |
+| 1. Chat | “A quiet beach where I used to walk with my dad” | The model reflects on the answer and asks a personal follow-up; code reads the scene, shapes, and colours from each answer |
+| 2. Follow-up | “Long, slow waves or small ripples?” → “Long slow waves, and a few round pebbles.” | One question at a time, only about choices still open, with three example answers |
+| 3. Create | **Create pattern**, available after the first answer | Suggest anything still missing, build the recipe, compose the artwork, and name it |
+| 4. View | The pattern, scarf preview, and recipe | Suggested and default values are marked and editable |
 | 5. Edit | “Make it denser.” or an edit button | Change that one setting; preserve the rest |
 | 6. Download | Save the design | Export a 2048 × 2048 PNG repeat tile |
 
-“Beach” can suggest waves and “quiet” can suggest low density. The user confirms these interpretations before generation.
+“Beach” can suggest waves and “quiet” can suggest low density. Suggested values stay marked in the recipe view, where the user can change them.
 
 ## 3. How one pattern is made
 
@@ -49,15 +49,15 @@ Tune sample combinations before connecting the chatbot. This establishes that th
 | Part | Implementation / limit/examples    |
 | --- | --- |
 | Web app | Next.js, React, TypeScript; Node.js API routes |
-| Text AI | One call per message: extract answers and write a short acknowledgement; interpret edit requests |
-| Application code | Track missing answers, word questions from templates, maintain memory, validate choices, create recipes, render artwork |
+| Text AI | One call per message: lead the conversation (reply, next question, example answers) and read answers into choices; name the pattern at Create; interpret edit requests |
+| Application code | Track open topics and check the model's question, maintain memory, validate choices, create recipes, render artwork; templates and keyword matching as the fallback |
 | Drawing library | Six original SVGs: wave, circle, dot, stripe, arch, leaf; use 1–3 per design |
 | Layouts | Regular grid or scattered |
 | Palettes | Warm, cool, green, vivid |
 | Density / size | 4, 9, or 16 placements; small, medium, or large motifs at fixed sizes, independent of density |
 | Memory | Separate chat, profile, and recipe state saved in browser localStorage |
-| Interface | Chat, suggestion chips, preference review, result/recipe view, edit buttons, scarf preview, download |
-| Deferred | Cultural-reference selection, image-model styling, custom training, RAG, accounts, saved-chats sidebar, model-written questions |
+| Interface | Chat with example answers, **Create pattern**, progress stages, result card, recipe view, edit buttons, scarf preview, download |
+| Deferred | Cultural-reference selection, image-model styling, custom training, RAG, accounts, saved-chats sidebar |
 
 Keep model credentials on the server. Validate structured AI output before applying it. Preserve the session after a failed call and allow retry; include a labelled sample demo. The full flow also works without the model, using the review form, suggestion chips, and keyword matching.
 
@@ -68,10 +68,11 @@ Keep model credentials on the server. Validate structured AI output before apply
 | 1 | Scaffold; build recipe rules and the renderer with placeholder motifs; tune in a `/lab` gallery | 70 min |
 | 2 | Draw and trace the six motifs; tune palettes and spacing in `/lab` | 40 min |
 | 3 | Build review, result, scarf preview, and export, so the app works without AI | 40 min |
-| 4 | Build question routing, memory, and keyword fallback; then model extraction | 75 min |
-| 5 | Add edits: buttons first, then chat | 25 min |
-| 6 | Check and rehearse | 30 min |
-| 7 | Integration buffer | 20 min |
+| 4 | Build question routing, memory, and keyword fallback; then the model-led conversation | 100 min |
+| 5 | Create flow: progress stages, result card, recipe view | 45 min |
+| 6 | Add edits: buttons first, then chat | 25 min |
+| 7 | Check and rehearse | 30 min |
+| 8 | Integration buffer | 20 min |
 
 Detailed steps, checkpoints, and a cut list are in [IMPLEMENTATION_PLAN.md §8](IMPLEMENTATION_PLAN.md#8-build-order).
 
@@ -83,13 +84,14 @@ Use Codex for the interface and implementation support. Focus my effort on artwo
 | --- | --- |
 | Contrasting profiles | Different shapes, arrangements, spacing, and colours |
 | Corrections and skips | Accurate profile; no repeated questions or invented answers |
-| Review | Suggestions and defaults are visible and editable |
+| Conversation | One question per reply, at most 45 words, in everyday words; the demo conversation is ready to create after four answers |
+| Suggestions | Suggested and default values are marked and editable after Create |
 | Recipe / repeat | Motif counts match; 3 × 3 preview has no unintended seams |
 | Edits | Requested setting changes; unrelated choices stay stable |
 | Export / recovery | PNG matches preview; failed calls preserve the session |
 | Without AI | Full flow works with the API key removed |
 
-**Demo:** Chat → review → create → inspect recipe → request one edit → download.
+**Demo:** Chat → create → view the recipe → request one edit → download.
 
 ## 7. Application response
 

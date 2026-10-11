@@ -27,3 +27,6 @@ next-env.d.ts
 *.tsbuildinfo
 .vercel
 assets/samples/
+
+# Third-party UI reference screenshots (kept locally)
+assets/everyhuman-example-ui/

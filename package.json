@@ -12,7 +12,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "trace": "node scripts/trace-motifs.ts",
     "render:samples": "tsx scripts/render-samples.ts",
-    "check:interview": "tsx scripts/check-interview.ts"
+    "check:interview": "tsx scripts/check-interview.ts",
+    "test:chat": "tsx --env-file=.env.local scripts/test-chat.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

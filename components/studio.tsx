@@ -1,13 +1,17 @@
 "use client";
 
-import { currentTopic, keywordExtract, takeTurn, answeredTopics, type Chip } from "@/lib/interview";
+import { useState } from "react";
+import { ChatUnavailable, requestTurn } from "@/lib/chat-client";
+import {
+  addUserMessage, answeredTopics, applyExtraction, applyModelTurn, currentTopic, keywordExtract, nextStep, takeTurn, type Chip,
+} from "@/lib/interview";
 import { profileToRecipe } from "@/lib/recipe";
 import { buildRenderPlan } from "@/lib/render";
 import { SAMPLES } from "@/lib/samples";
 import { emptySession } from "@/lib/session";
 import type { Phase, Profile, Session } from "@/lib/types";
 import { useHydrated, useSession } from "@/lib/use-session";
-import { Chat } from "./chat";
+import { Chat, type Notice } from "./chat";
 import { ResultView } from "./result-view";
 import { ReviewForm } from "./review-form";
 
@@ -17,7 +21,7 @@ function withPhase(session: Session, phase: Phase): Session {
 
 function Intro() {
   return (
-    <section className="flex max-w-2xl flex-col gap-3 pt-6 pb-4">
+    <section className="mx-auto flex w-full max-w-3xl flex-col gap-3 pt-6 pb-4">
       <h2 className="font-serif text-4xl leading-tight sm:text-5xl">A pattern made from your story</h2>
       <p className="text-lg text-foreground/75">
         Share a place, a memory, or a feeling, and Common Threads composes a repeating textile pattern from an
@@ -30,12 +34,17 @@ function Intro() {
 export default function Studio() {
   const hydrated = useHydrated();
   const [session, update] = useSession();
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const { phase } = session.interview;
   const sample = SAMPLES.find((s) => s.id === session.sampleId);
 
   const startOver = () => {
     const hasWork = session.messages.some((m) => m.role === "user") || session.profile.motifs || session.currentRecipe;
-    if (!hasWork || window.confirm("Start a new chat? Your current design will be cleared.")) update(() => emptySession());
+    if (!hasWork || window.confirm("Start a new chat? Your current design will be cleared.")) {
+      setNotice(null);
+      update(() => emptySession());
+    }
   };
 
   // Each click loads the next sample, labelled in the review form.
@@ -47,7 +56,44 @@ export default function Studio() {
   const changeProfile = (profile: Profile) => update((s) => ({ ...s, profile }));
 
   // Step 5 reads answers with keyword matching; Step 6 puts the model call here.
-  const send = (text: string) => update((s) => takeTurn(s, text, keywordExtract(text, currentTopic(s))));
+  // Ask the model about the latest user message; if it is unavailable, read the
+  // message with keyword matching instead and offer a retry.
+  const answer = async (sent: Session, text: string, userId: string) => {
+    const stillLatest = (s: Session) => s.messages.at(-1)?.id === userId;
+    setPending(true);
+    setNotice(null);
+    try {
+      const turn = await requestTurn(sent);
+      update((s) => (stillLatest(s) ? applyModelTurn(s, turn, userId) : s));
+    } catch (error) {
+      update((s) => (stillLatest(s) ? applyExtraction(s, keywordExtract(text, currentTopic(sent)), userId) : s));
+      const retry = () => {
+        let reverted = false;
+        update((s) => {
+          if (s.messages.length !== sent.messages.length + 1 || s.messages.at(-2)?.id !== userId) return s;
+          reverted = true;
+          return sent;
+        });
+        if (reverted) void answer(sent, text, userId);
+        else setNotice(null);
+      };
+      setNotice({ reason: error instanceof ChatUnavailable ? error.message : "error", onRetry: retry });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const send = (text: string) => {
+    let sent = session;
+    let userId = "";
+    update((s) => {
+      [sent, userId] = addUserMessage(s, text);
+      return sent;
+    });
+    void answer(sent, text, userId);
+  };
+
+  // Fixed chips (fallback only) set values directly, without a model call.
   const choose = (chip: Chip) => update((s) => takeTurn(s, chip.label, chip.extraction));
   const toReview = () => update((s) => withPhase(s, "REVIEW"));
 
@@ -95,7 +141,10 @@ export default function Studio() {
           <Intro />
           <Chat
             messages={session.messages}
+            pending={pending}
+            notice={notice}
             canCreate={answeredTopics(session.profile).length > 0}
+            ready={nextStep(session).kind === "ready"}
             onSend={send}
             onChip={choose}
             onCreate={toReview}

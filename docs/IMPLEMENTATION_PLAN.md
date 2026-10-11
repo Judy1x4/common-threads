@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Frontend | Next.js + React + TypeScript | Chat, review, pattern preview, edits, download |
 | Backend | Next.js API routes on Node.js | Model calls only; validate their output |
-| AI | One Claude call per user message (`claude-opus-5-5` at low effort; override with `ANTHROPIC_MODEL`) | Extract preferences, write a short acknowledgement, interpret edits |
+| AI | One Claude call per user message, plus one at Create (`claude-opus-5-5` at low effort; override with `ANTHROPIC_MODEL`) | Lead the conversation: read each answer, write the reply, the next question, and example answers; name the pattern; interpret edits |
 | Application code | TypeScript in the browser | Choose questions, merge the profile, build recipes, render, export |
 | Storage | Browser localStorage | Save the current chat, profile, recipe, and render plan |
 | Artwork | Six original SVG drawings + two layouts | Compose patterns in TypeScript |
@@ -19,13 +19,13 @@
 
 Use TypeScript throughout. Keep the model API key on the server, and validate browser-supplied data and model output with zod. The session survives reloads in the same browser. An existing React/Node app can use the same structure.
 
-The prototype uses original art and visual preferences. Cultural-reference selection, image-model generation, model training, RAG, accounts, a saved-chats sidebar, progress stages, and model-written questions are outside this build.
+The prototype uses original art and visual preferences. Cultural-reference selection, image-model generation, model training, RAG, accounts, and a saved-chats sidebar are outside this build.
 
 ### Key decisions
 
 | Decision | Reason |
 | --- | --- |
-| One model call per message; code words the next question from a template | Halves latency and failure points; questions stay predictable |
+| The model writes each reply and question; code decides which topics are open and checks the model's choice | Personal questions drawn from the user's own imagery, as in EveryHuman, while code still guarantees the pattern gets what it needs; templates and keyword matching are the fallback ([CONVERSATION_PLAN.md](CONVERSATION_PLAN.md)) |
 | The server only interprets language; the recipe, render plan, explanation, and PNG are built in the browser | No `/api/design`; the explanation comes from the recipe's own reasons, so it always matches the pattern |
 | Build the review form before the chat | The chat fills the form; the form is also the fallback and the sample demo |
 | Draw every motif at all nine tile offsets | Seamless by construction; no edge-crossing detection |
@@ -36,7 +36,7 @@ The prototype uses original art and visual preferences. Cultural-reference selec
 
 ## 2. Guided conversation
 
-The model understands answers. **Code tracks missing information, chooses the next question, and words it from a template.**
+The model leads the conversation: it reads each answer and writes the reply, the next question, and three example answers. **Code decides which topics are still open, checks the model's choice, and falls back to the templates below.** Details: [CONVERSATION_PLAN.md](CONVERSATION_PLAN.md).
 
 | Term | Meaning |
 | --- | --- |
@@ -47,7 +47,7 @@ The model understands answers. **Code tracks missing information, chooses the ne
 
 ### Question topics
 
-| Topic | Question template | Chips | Collect |
+| Topic | Fallback question | Fallback chips | Collect |
 | --- | --- | --- | --- |
 | Scene | “What scene, memory, or feeling should the pattern reflect?” | Skip | Optional personal context |
 | Shapes | “Which shapes would you like: waves, circles, leaves, or something else?” | The six motifs | 1–3 supported motif IDs; main/accent emphasis; exclusions |
@@ -55,7 +55,7 @@ The model understands answers. **Code tracks missing information, chooses the ne
 | Arrangement | “Regularly arranged or scattered?” | Regular · Scattered | Layout |
 | Detail | “Small and spacious, or large and busy?” | Small and spacious · Medium · Large and busy | Motif size and density |
 
-One answer may fill several topics. The bot's reply is the model's acknowledgement (at most 20 words) followed by the next templated question and its chips. Clicking a chip sets the value directly, without a model call.
+One answer may fill several topics. The model's reply is a short reflection plus one question (at most 45 words), with three example answers; tapping one sends it as a message. When the model is unavailable, the fallback question and chips appear instead, and a chip sets its value directly.
 
 | Situation | Code action |
 | --- | --- |
@@ -64,9 +64,9 @@ One answer may fill several topics. The bot's reply is the model's acknowledgeme
 | Suggestion conflicts with an explicit choice | Keep the explicit choice |
 | User skips | Keep it skipped; leave personal context empty |
 | Unsupported shape | Name the closest supported motif, e.g. “There's no star; the closest is dot.” |
-| Missing design choice | Ask about the first unanswered topic |
-| Choices complete, or six questions asked | Show review |
-| User clicks **Create pattern** early | Show review immediately |
+| Open topic | The model asks about an open topic. Shapes, colours, and arrangement stay open until answered explicitly and may be asked twice; scene and detail settle on any value and are asked once |
+| Nothing open, or six questions asked | Invite the user to create; **Create pattern** turns solid |
+| User clicks **Create pattern** early | Create from what is known; missing values are suggested at Create (CONVERSATION_PLAN Step 7) |
 
 **Precedence:** explicit > suggested > default; among explicit values, the newest wins. Show **Create pattern** after the first substantive answer.
 
@@ -103,15 +103,16 @@ type Placement = { motifId: MotifId; x: number; y: number; rotation: number; col
 
 | Step | Runs in | Action |
 | --- | --- | --- |
-| 1. Save | Browser | Save the session before calling the model |
-| 2. Extract | `/api/extract` (one model call) | Return structured updates, skipped topics, unsupported shapes, and an acknowledgement |
-| 3. Validate | Server | Check the schema; drop unknown IDs and message IDs not in the conversation |
-| 4. Merge | Browser | Apply the precedence rule; remove excluded motifs; update answered topics |
-| 5. Reply | Browser | Choose the next topic or review; show acknowledgement + templated question + chips |
+| 1. Save | Browser | Add the user message and save the session |
+| 2. Ask | Browser → `POST /api/chat` | Send the last 12 messages (from the first user message), the profile, the open topics, and the question count |
+| 3. Call | Server | One Claude call with structured output (extraction, reply, askedTopic, suggestions), validated with zod |
+| 4. Merge | Browser | `mergeProfile` applies the extraction with the precedence rule |
+| 5. Check | Browser | Keep the model's reply if its topic is still open, or if it asks nothing when nothing is open; otherwise use the fallback question |
+| 6. Show | Browser | Add the reply and its example answers; save |
 
-The extraction prompt includes the catalogue IDs and tags, the palette descriptions, and these rules: use only supported IDs; mark interpretations such as beach → `wave` as suggestions; never invent answers; the acknowledgement asks no question.
+The system prompt (`lib/prompt.ts`) holds the catalogue, the topic guide, and the rules, and never changes, so it can be cached. The per-turn state (open and closed topics, question count, current choices) goes in a mid-conversation system message after the latest user message. Colour words the user says are explicit; interpretations such as beach → `wave` or quiet → low density are suggestions.
 
-If the call fails or takes more than 15 s, run `keywordExtract` on the message, use a fixed acknowledgement, and show a small **AI unavailable – retry** notice. The session is already saved.
+If the call fails, takes more than 15 s, or fails validation, run `keywordExtract` on the message, use the fallback question and chips, and show **AI unavailable – Retry**. The session is already saved.
 
 **Phases:** `INTERVIEW → REVIEW → RESULT`. Design edits update the result; profile corrections offer regeneration.
 
@@ -239,7 +240,7 @@ Image generation and editing are possible, but model documentation still lists p
 
 ## 6. Editing
 
-The result view has edit buttons: **Warmer / Cooler**, **Smaller / Larger**, **Calmer / Busier**, **Shuffle**, and **Undo**. Chat requests do the same through `/api/edit`.
+The result view has edit buttons: **Warmer / Cooler**, **Smaller / Larger**, **Calmer / Busier**, **Shuffle**, and **Undo**. Chat requests do the same through `/api/chat` in edit mode.
 
 | Request | Code action |
 | --- | --- |
@@ -261,32 +262,36 @@ Use the supplied EveryHuman screenshots as the interaction reference.
 | UI element | Behaviour |
 | --- | --- |
 | Header | **New chat**; **Try sample** loads a labelled sample profile |
-| Chat + fixed input | Short replies; suggestion chips; **Create pattern** |
+| Chat + fixed input | Model replies; example answers (rows at the opening, then behind **Show suggestions**); typing indicator; **Create pattern**; fallback chips and retry notice |
 | Review | Confirm motifs (off / main / accent), palette, layout, size, and density; badges show “you said”, “suggested”, or “default” |
 | Result | Pattern repeat, scarf, recipe card (counts, swatches, settings, reasons), edit buttons, **Download PNG** |
 | `/lab` | Sample-recipe gallery for tuning (development only) |
 
 | Endpoint | Input | Output |
 | --- | --- | --- |
-| `POST /api/extract` | Last ~10 messages, profile, current topic | Validated updates, skipped topics, unsupported shapes, acknowledgement |
-| `POST /api/edit` | Instruction, recipe summary | One validated edit operation |
+| `POST /api/chat` (`mode: "interview"`) | Last 12 messages, profile, open topics, question count | Validated extraction, reply, askedTopic, and example answers |
+
+The `finish` (Create) and `edit` modes arrive in CONVERSATION_PLAN Steps 7–8.
 
 The browser builds the recipe, render plan, title, explanation, and PNG; the server only calls the model. The title comes from the scene (e.g. “Quiet Beach”) and the explanation from the recipe's reasons.
 
 ```text
 app/page.tsx              renders the studio
 app/lab/                  sample-recipe gallery
-app/api/extract/route.ts
-app/api/edit/route.ts
-components/studio.tsx     phases (chat → review → result), header, session actions
+app/api/chat/route.ts     the only API route: validates input, calls the model, returns its turn
+components/studio.tsx     phases (chat → review → result), header, session actions, model calls
+components/chat.tsx       transcript, example answers, Create, typing indicator, fallback notice
 components/review-form.tsx
 components/result-view.tsx
 lib/types.ts
 lib/schemas.ts            zod schemas for requests and model output
+lib/prompt.ts             system prompt and per-turn state note
+lib/model.ts              server-only Claude call (structured output, 15 s limit)
+lib/chat-client.ts        browser call to /api/chat
 lib/catalogue.ts          motifs, palettes, sizes
 lib/motif-paths.ts        generated by npm run trace
 lib/samples.ts            sample profiles for /lab and Try sample
-lib/interview.ts          mergeProfile, nextStep, templates, chips, keywordExtract
+lib/interview.ts          mergeProfile, openTopics, applyModelTurn, templates, chips, keywordExtract
 lib/recipe.ts             profileToRecipe, allocateCounts, applyEdit, reasons, patternTitle
 lib/render.ts             rng, buildRenderPlan, renderTile, renderRepeat, renderScarf, exportPng
 lib/session.ts            localStorage
@@ -333,33 +338,29 @@ About five hours. Each step ends with something you can check; commit after each
 - `keywordExtract` from motif tags and a small word list (blue → cool, scattered → scattered, quiet → low density).
 - **Done when** the demo conversation reaches review with the right values using keywords alone.
 
-### Step 6 — Model extraction (35 min)
+### Steps 6–9 — model-led conversation, Create, edits, rehearsal
 
-- `/api/extract` with the zod schema, extraction prompt, and server validation (§3).
-- Acknowledgement + templated question; unsupported-shape message; 15 s timeout with keyword fallback.
-- **Done when** one answer fills several fields, “actually, green” replaces the palette, skips stay skipped, and the app still works with the API key removed.
+These steps follow [CONVERSATION_PLAN.md §7](CONVERSATION_PLAN.md#7-build-order-replaces-steps-68), which replaced the original Steps 6–8:
 
-### Step 7 — Edits (25 min)
-
-- Edit buttons and **Undo** first; then `/api/edit` for chat requests (§6).
-- **Done when** a palette edit leaves every position unchanged and a density edit keeps the palette and size.
-
-### Step 8 — Check and rehearse (30 min + 20 min buffer)
-
-- Run the completion checks in PROJECT_PLAN §6, including cutting the network mid-chat.
-- Rehearse the demo twice.
-- Optional: deploy on Vercel with the API key as an environment variable.
+| Step | Build | Budget |
+| --- | --- | --- |
+| 6 | LLM conversation: `/api/chat`, prompt, model turns, example answers, fallback; tuned with `npm run test:chat` | 60 min |
+| 7 | Create and result: finish mode, progress stages, result card, View panel, download | 45 min |
+| 8 | Edits: buttons and **Undo**, then chat edits (§6) | 25 min |
+| 9 | Check and rehearse | 30 min + 20 min buffer |
 
 | Checkpoint | Target time |
 | --- | --- |
 | Real artwork in `/lab` | ~1 h 50 |
 | App works without AI | ~2 h 30 |
-| Chat with model extraction | ~3 h 45 |
-| Edits | ~4 h 10 |
+| Keyword chat | ~3 h 10 |
+| Model-led chat | ~4 h 10 |
+| Create and result card | ~4 h 55 |
+| Edits | ~5 h 20 |
 
-**If behind, cut in this order:** chat edits (keep the buttons) → detail question (keep medium defaults) → scarf (keep the 3 × 3) → model extraction (keywords and chips still show the flow).
+**If behind, cut in this order:** chat edits (keep the buttons) → progress stages → model-written name and description (use `patternTitle`) → changes in the View panel (keep **Change choices** and the form). Keep the model conversation; the keyword fallback is its safety net.
 
-**Demo:** Share a scene → answer a follow-up → review preferences → create → inspect ingredients → edit → download.
+**Demo:** Share a scene → answer the model's follow-ups → create → view the recipe → edit → download.
 
 Focus engineering effort on extraction, memory, routing, composition rules, and controlled edits. The six-motif catalogue fits in model context; session memory does not require RAG.
 
