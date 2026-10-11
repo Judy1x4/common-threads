@@ -11,7 +11,8 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "trace": "node scripts/trace-motifs.ts",
-    "render:samples": "tsx scripts/render-samples.ts"
+    "render:samples": "tsx scripts/render-samples.ts",
+    "check:interview": "tsx scripts/check-interview.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

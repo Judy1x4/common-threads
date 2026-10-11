@@ -34,7 +34,24 @@ export type Profile = {
   motifScale?: Field<MotifScale>;
 };
 
-export type Message = { id: string; role: "user" | "assistant"; text: string };
+// An assistant message that asks about a topic carries it, so the chat can show that topic's chips.
+export type Message = { id: string; role: "user" | "assistant"; text: string; topic?: Topic };
+
+// What one user message says, from keyword matching or the model (same shape as
+// the Step 0 test schema). "suggested" means inferred, e.g. beach → wave.
+export type Stated<T> = { value: T; origin: "explicit" | "suggested" };
+export type Extraction = {
+  scene: string | null;
+  motifs: { id: MotifId; role: MotifRole | "equal"; origin: "explicit" | "suggested" }[];
+  excludedIngredientIds: MotifId[];
+  paletteId: Stated<PaletteId> | null;
+  layoutId: Stated<LayoutId> | null;
+  density: Stated<Density> | null;
+  motifScale: Stated<MotifScale> | null;
+  skippedTopics: Topic[];
+  unsupportedShapes: string[];
+  acknowledgement: string; // empty: code writes one from the extracted values
+};
 
 export type Interview = {
   phase: Phase;

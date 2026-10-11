@@ -1,11 +1,13 @@
 "use client";
 
+import { currentTopic, keywordExtract, takeTurn, answeredTopics, type Chip } from "@/lib/interview";
 import { profileToRecipe } from "@/lib/recipe";
 import { buildRenderPlan } from "@/lib/render";
 import { SAMPLES } from "@/lib/samples";
 import { emptySession } from "@/lib/session";
 import type { Phase, Profile, Session } from "@/lib/types";
 import { useHydrated, useSession } from "@/lib/use-session";
+import { Chat } from "./chat";
 import { ResultView } from "./result-view";
 import { ReviewForm } from "./review-form";
 
@@ -13,23 +15,14 @@ function withPhase(session: Session, phase: Phase): Session {
   return { ...session, interview: { ...session.interview, phase } };
 }
 
-// Step 4 start screen; the chat replaces it in Step 5.
-function Intro({ onStart, onSample }: { onStart: () => void; onSample: () => void }) {
+function Intro() {
   return (
-    <section className="flex max-w-2xl flex-col gap-6 py-10">
-      <h2 className="font-serif text-5xl leading-tight">A pattern made from your story</h2>
+    <section className="flex max-w-2xl flex-col gap-3 pt-6 pb-4">
+      <h2 className="font-serif text-4xl leading-tight sm:text-5xl">A pattern made from your story</h2>
       <p className="text-lg text-foreground/75">
-        Share a place, a memory, or a feeling, choose shapes and colours, and Common Threads composes a repeating textile
-        pattern from an artist&apos;s original hand-drawn motifs.
+        Share a place, a memory, or a feeling, and Common Threads composes a repeating textile pattern from an
+        artist&apos;s original hand-drawn motifs.
       </p>
-      <div className="flex flex-wrap gap-3">
-        <button type="button" onClick={onStart} className="rounded-full bg-foreground px-6 py-3 text-background hover:opacity-90">
-          Choose your design
-        </button>
-        <button type="button" onClick={onSample} className="rounded-full border border-black/15 px-6 py-3 hover:bg-black/5">
-          Try a sample
-        </button>
-      </div>
     </section>
   );
 }
@@ -41,7 +34,7 @@ export default function Studio() {
   const sample = SAMPLES.find((s) => s.id === session.sampleId);
 
   const startOver = () => {
-    const hasWork = session.messages.length > 0 || session.profile.motifs || session.currentRecipe;
+    const hasWork = session.messages.some((m) => m.role === "user") || session.profile.motifs || session.currentRecipe;
     if (!hasWork || window.confirm("Start a new chat? Your current design will be cleared.")) update(() => emptySession());
   };
 
@@ -52,6 +45,11 @@ export default function Studio() {
   };
 
   const changeProfile = (profile: Profile) => update((s) => ({ ...s, profile }));
+
+  // Step 5 reads answers with keyword matching; Step 6 puts the model call here.
+  const send = (text: string) => update((s) => takeTurn(s, text, keywordExtract(text, currentTopic(s))));
+  const choose = (chip: Chip) => update((s) => takeTurn(s, chip.label, chip.extraction));
+  const toReview = () => update((s) => withPhase(s, "REVIEW"));
 
   const create = () =>
     update((s) => {
@@ -82,9 +80,28 @@ export default function Studio() {
           onChangeChoices={() => update((s) => withPhase(s, "REVIEW"))}
         />
       ) : phase === "REVIEW" || phase === "RESULT" ? (
-        <ReviewForm profile={session.profile} sampleName={sample?.name} onChange={changeProfile} onCreate={create} />
+        <div className="flex flex-col gap-3">
+          <ReviewForm profile={session.profile} sampleName={sample?.name} onChange={changeProfile} onCreate={create} />
+          <button
+            type="button"
+            onClick={() => update((s) => withPhase(s, "INTERVIEW"))}
+            className="self-start text-sm text-foreground/60 underline underline-offset-4"
+          >
+            Back to the chat
+          </button>
+        </div>
       ) : (
-        <Intro onStart={() => update((s) => withPhase(s, "REVIEW"))} onSample={trySample} />
+        <>
+          <Intro />
+          <Chat
+            messages={session.messages}
+            canCreate={answeredTopics(session.profile).length > 0}
+            onSend={send}
+            onChip={choose}
+            onCreate={toReview}
+            onSkipToChoices={toReview}
+          />
+        </>
       )}
     </div>
   );

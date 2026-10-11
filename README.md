@@ -18,6 +18,7 @@ npm run dev                  # http://localhost:3000 (pattern lab: /lab)
 | `npm run test:claude` | Check the API key and the structured profile extraction |
 | `npm run trace` | Trace the drawings in `assets/raw/` and regenerate `lib/motif-paths.ts` |
 | `npm run render:samples` | Render the sample patterns as PNGs in `assets/samples/` (add `-- --edges` to mark tile edges) |
+| `npm run check:interview` | Check the conversation logic (merge, next question, keywords, chips) |
 | `npm run typecheck` | Generate Next.js route types and run TypeScript |
 | `npm run lint` | Run ESLint |
 | `npm run build` | Production build |
