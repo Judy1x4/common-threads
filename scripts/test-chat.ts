@@ -1,8 +1,10 @@
 // Plays conversations against the real model, through the same request builder
 // and turn logic as the browser, to tune the prompt (docs/CONVERSATION_PLAN.md §7).
 // Run: npm run test:chat            (uses ANTHROPIC_API_KEY and ANTHROPIC_MODEL from .env.local)
-import { addUserMessage, applyModelTurn, interviewRequest, nextStep } from "../lib/interview";
-import { interviewTurn, modelName, usesSystemRole } from "../lib/model";
+import { applyFinish, buildDesign, CREATE_MESSAGE, finishRequest } from "../lib/design";
+import { addUserMessage, applyModelTurn, interviewRequest, nextStep, polishReply } from "../lib/interview";
+import { finishTurn, interviewTurn, modelName, usesSystemRole } from "../lib/model";
+import { missingChoices } from "../lib/recipe";
 import { emptySession } from "../lib/session";
 import type { Session } from "../lib/types";
 
@@ -21,7 +23,8 @@ async function say(session: Session, text: string): Promise<Session> {
   timings.push(Date.now() - started);
   const next = applyModelTurn(sent, turn, id);
   const reply = next.messages.at(-1)!;
-  const kept = reply.text === turn.reply;
+  const kept = reply.text === polishReply(turn.reply);
+  if (kept && reply.text !== turn.reply) console.log(`       (polished; model wrote: ${turn.reply})`);
   console.log(`  You: ${text}\n  Bot: ${reply.text}${kept ? "" : `  [template; model asked ${turn.askedTopic}]`}`);
   console.log(`       → asked ${reply.topic ?? "nothing (ready)"} · suggestions: ${(reply.suggestions ?? []).join(" | ") || "none"} · ${timings.at(-1)} ms`);
   if (kept) {
@@ -66,6 +69,21 @@ async function main() {
   s = await say(s, "Flowers and stars, please");
   check("the scene stays skipped", s.interview.skippedTopics.includes("scene") && s.messages.at(-1)!.topic !== "scene");
   check("the reply names a supported alternative", /leaves|leaf|dots?|circles?/i.test(s.messages.at(-1)!.text), s.messages.at(-1)!.text);
+
+  console.log("\n4. Create after a single answer (finish mode)");
+  s = await say(emptySession(), "My grandmother's garden in autumn");
+  const [sent, createId] = addUserMessage(s, CREATE_MESSAGE);
+  const started = Date.now();
+  const finish = await finishTurn(finishRequest(sent));
+  timings.push(Date.now() - started);
+  const profile = applyFinish(sent.profile, finish.extraction, createId);
+  console.log(`  Name: ${finish.name}\n  Description: ${finish.description}\n  Profile: ${fields({ ...sent, profile })} · ${timings.at(-1)} ms`);
+  check("the pattern is complete", missingChoices(profile).length === 0, profile);
+  check("filled-in values are marked suggested", [profile.paletteId, profile.layoutId].every((f) => f?.origin === "suggested" || f?.origin === "explicit") && profile.layoutId?.origin === "suggested", profile);
+  check("name of 2–3 words", /^\S+(\s\S+){1,2}$/.test(finish.name.trim()), finish.name);
+  check("description ≤ 35 words, no jargon", finish.description.split(/\s+/).length <= 35 && !TECHNICAL.test(finish.description), finish.description);
+  const design = buildDesign(profile, 7, finish);
+  check("the design builds", design.plan.length > 0 && design.name === finish.name.trim());
 
   console.log(`\nState note sent as: ${usesSystemRole() ? "mid-conversation system message" : "<state> block in the user message (system role unsupported)"}`);
   console.log(`Time per turn: median ${timings.sort((a, b) => a - b)[Math.floor(timings.length / 2)]} ms, max ${Math.max(...timings)} ms`);

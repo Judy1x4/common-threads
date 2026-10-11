@@ -56,3 +56,19 @@ export const InterviewRequestSchema = z.object({
   questionCount: z.number().int().min(0).max(20),
 });
 export type InterviewRequest = z.infer<typeof InterviewRequestSchema>;
+
+// mode "finish": sent when the user clicks Create pattern.
+export const FinishRequestSchema = InterviewRequestSchema.omit({ mode: true, openTopics: true, questionCount: true }).extend({
+  mode: z.literal("finish"),
+  missing: z.array(z.enum(TOPICS)),
+});
+export type FinishRequest = z.infer<typeof FinishRequestSchema>;
+
+export const FinishTurnSchema = z.object({
+  extraction: ExtractionSchema.describe("Suggestions for the missing choices only"),
+  name: z.string().describe("A 2–3 word title for the pattern"),
+  description: z.string().describe("At most 35 words about the place and feeling of the pattern"),
+});
+export type FinishTurn = z.infer<typeof FinishTurnSchema>;
+
+export const ChatRequestSchema = z.discriminatedUnion("mode", [InterviewRequestSchema, FinishRequestSchema]);

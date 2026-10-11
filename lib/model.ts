@@ -5,8 +5,9 @@ import net from "node:net";
 import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { INTERVIEW_SYSTEM, interviewState } from "./prompt";
-import { ChatTurnSchema, type ChatTurn, type InterviewRequest } from "./schemas";
+import type { z } from "zod";
+import { FINISH_SYSTEM, finishState, INTERVIEW_SYSTEM, interviewState } from "./prompt";
+import { ChatTurnSchema, FinishTurnSchema, type ChatTurn, type FinishRequest, type FinishTurn, type InterviewRequest } from "./schemas";
 import type { Profile } from "./types";
 
 const TIME_LIMIT_MS = 15_000; // the whole call, retries included; then the browser falls back
@@ -27,7 +28,13 @@ export class ModelError extends Error {}
 // The model's state note goes in a mid-conversation system message, which keeps
 // the cached prefix stable. If the model rejects that role, retry with the note
 // as a tagged block in the latest user message.
-async function parseTurn(history: BetaMessageParam[], state: string, stateInSystemRole: boolean): Promise<ChatTurn> {
+async function parseTurn<S extends z.ZodType>(
+  system: string,
+  schema: S,
+  history: BetaMessageParam[],
+  state: string,
+  stateInSystemRole: boolean,
+): Promise<z.infer<S>> {
   const model = modelName();
   const messages: BetaMessageParam[] = stateInSystemRole
     ? [...history, { role: "system", content: state }]
@@ -51,8 +58,8 @@ async function parseTurn(history: BetaMessageParam[], state: string, stateInSyst
       // CHAT_THINKING=off lets Haiku skip thinking: about twice as fast, but it
       // breaks the reply rules more often. Opus 5.5 always thinks.
       ...(model.includes("haiku") && process.env.CHAT_THINKING === "off" ? { thinking: { type: "disabled" as const } } : {}),
-      output_config: { effort: "low", format: betaZodOutputFormat(ChatTurnSchema) },
-      system: [{ type: "text", text: INTERVIEW_SYSTEM, cache_control: { type: "ephemeral" } }],
+      output_config: { effort: "low", format: betaZodOutputFormat(schema) },
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages,
     },
     { signal: AbortSignal.timeout(TIME_LIMIT_MS) },
@@ -60,22 +67,31 @@ async function parseTurn(history: BetaMessageParam[], state: string, stateInSyst
 
   if (response.stop_reason === "refusal") throw new ModelError(`declined (${response.stop_details?.category ?? "no category"})`);
   if (!response.parsed_output) throw new ModelError(`no structured output (stop reason: ${response.stop_reason})`);
-  return response.parsed_output;
+  return response.parsed_output as z.infer<S>;
 }
 
 let systemRoleSupported = true;
 export const usesSystemRole = () => systemRoleSupported; // for scripts/test-chat.ts
 
-export async function interviewTurn(request: InterviewRequest): Promise<ChatTurn> {
+async function call<S extends z.ZodType>(system: string, schema: S, request: { messages: InterviewRequest["messages"] }, state: string) {
   const history: BetaMessageParam[] = request.messages.map((m) => ({ role: m.role, content: m.text }));
-  const state = interviewState(request.profile as Profile, request.openTopics, request.questionCount);
   try {
-    return await parseTurn(history, state, systemRoleSupported);
+    return await parseTurn(system, schema, history, state, systemRoleSupported);
   } catch (error) {
     if (systemRoleSupported && error instanceof Anthropic.BadRequestError && /role/i.test(error.message)) {
       systemRoleSupported = false;
-      return parseTurn(history, state, false);
+      return parseTurn(system, schema, history, state, false);
     }
     throw error;
   }
+}
+
+// Every user message: read the answer, write the reply and next question.
+export function interviewTurn(request: InterviewRequest): Promise<ChatTurn> {
+  return call(INTERVIEW_SYSTEM, ChatTurnSchema, request, interviewState(request.profile as Profile, request.openTopics, request.questionCount));
+}
+
+// Create pattern: suggest the missing choices, and name and describe the pattern.
+export function finishTurn(request: FinishRequest): Promise<FinishTurn> {
+  return call(FINISH_SYSTEM, FinishTurnSchema, request, finishState(request.profile as Profile, request.missing));
 }

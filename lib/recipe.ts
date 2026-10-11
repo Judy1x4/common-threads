@@ -105,16 +105,27 @@ function recipeReasons(profile: Profile, motifs: MotifChoice[], settings: Settin
 
 const SMALL_WORDS = new Set(["a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "with"]);
 
-// A short title for the result: the scene in title case ("a quiet beach" →
-// "Quiet Beach"), or the palette and main motif when there is no scene.
+// A short title for the result: the start of the scene in title case, at most
+// four words ("a quiet beach where I walked" → "Quiet Beach"), or the palette
+// and main motif when there is no scene.
 export function patternTitle(profile: Profile, recipe: Recipe): string {
-  const scene = profile.scene?.value.trim().replace(/^(a|an|the)\s+/i, "");
+  const scene = profile.scene?.value
+    .split(/[,.;:!?]|\s(?:where|when|that|which|while|because|with)\s/i)[0]
+    .trim()
+    .replace(/^(a|an|the)\s+/i, "");
   if (scene) {
-    return scene
-      .split(/\s+/)
+    const words = scene.split(/\s+/).slice(0, 4);
+    while (words.length > 1 && SMALL_WORDS.has(words.at(-1)!.toLowerCase())) words.pop();
+    return words
       .map((word, i) => (i > 0 && SMALL_WORDS.has(word.toLowerCase()) ? word.toLowerCase() : capitalise(word)))
       .join(" ");
   }
   const main = recipe.ingredients.find((ing) => ing.role === "main") ?? recipe.ingredients[0];
   return `${PALETTES[recipe.paletteId].label} ${MOTIFS[main.id].label}`;
+}
+
+// A plain description for when the model cannot write one.
+export function describeDesign(recipe: Recipe): string {
+  const motifs = listLabels(recipe.ingredients.map((ing) => ({ id: ing.id })));
+  return `${capitalise(LAYOUTS[recipe.layoutId].label.toLowerCase())} ${motifs} in ${PALETTES[recipe.paletteId].label.toLowerCase()} colours.`;
 }

@@ -198,3 +198,14 @@ Testing real conversations with `npm run test:chat` changed a few details of §3
 | Haiku without thinking was twice as fast (median 2.9 s) but used jargon and asked two questions | Thinking stays on (median about 4.7 s per turn); `CHAT_THINKING=off` is an opt-in |
 | Half of new API connections failed with `ETIMEDOUT` under WSL (no IPv6 route) | `lib/model.ts` prefers IPv4 and allows 2 s per address |
 | Mid-conversation system messages work on Claude Haiku 5.5 | Kept, with a fallback to a `<state>` block in the user message if a model rejects the role |
+
+## 11. Implementation notes (Step 7)
+
+| Decision | Detail |
+| --- | --- |
+| Result cards keep a snapshot | Each card message stores its design (name, description, recipe, render plan), so “Create another” and later edits leave earlier versions unchanged. `Session.design` is the latest; `previousDesign` is kept for Undo |
+| One phase fewer | `RESULT` is gone: results live in the chat. Sessions saved earlier are upgraded on load into a chat with a result card |
+| Finish fills gaps only | `applyFinish` writes the model's suggestions only into empty fields and always marks them suggested |
+| View panel | Only the latest card is editable, and only it shows badges, because badges describe the current choices. A change rebuilds with the same seed, name, and description |
+| Names and descriptions | The description may mention only shapes in the final design. Names avoid “pattern”, “repeat”, “tile”, and “design”. Without the model, the title is the start of the scene, at most four words |
+| Without the model | Create uses code's name and description; if a required choice is missing, the choices form opens with it marked |

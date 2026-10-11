@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CREATE_STAGES } from "@/lib/design";
 import { chipsFor, type Chip } from "@/lib/interview";
-import type { Message } from "@/lib/types";
+import { renderTile, svgDataUrl } from "@/lib/render";
+import type { Design, Message } from "@/lib/types";
+import { downloadDesign } from "./download";
 
 export type Notice = { reason: string; onRetry?: () => void };
 
@@ -23,27 +26,88 @@ function SuggestionRows({ suggestions, onPick }: { suggestions: string[]; onPick
   );
 }
 
-function CreateButton({ emphasis, onClick }: { emphasis: boolean; onClick: () => void }) {
+function CreateButton({ emphasis, label, onClick }: { emphasis: boolean; label: string; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={`rounded-xl px-4 py-2.5 text-sm ${emphasis ? "bg-foreground text-background hover:opacity-90" : "border border-black/15 bg-white/70 hover:border-black/30"}`}
     >
-      ✦ Create pattern
+      ✦ {label}
     </button>
   );
 }
 
-export function Chat({ messages, pending, notice, canCreate, ready, onSend, onChip, onCreate, onSkipToChoices }: {
+// The real steps behind Create; the first waits on the model.
+function Progress({ stage }: { stage: number }) {
+  return (
+    <ol className="flex flex-col gap-2" aria-label="Creating your pattern">
+      {CREATE_STAGES.map((label, i) => (
+        <li key={label} className={`flex items-center gap-3 ${i > stage ? "text-foreground/35" : ""}`}>
+          {i < stage ? (
+            <span className="w-4 text-center text-[#426451]">✓</span>
+          ) : i === stage ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-foreground/20 border-t-foreground" />
+          ) : (
+            <span className="w-4 text-center">·</span>
+          )}
+          {label}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// A result card in the chat: tile, name, description, View, and Download.
+function DesignCard({ design, onView }: { design: Design; onView: () => void }) {
+  const [downloading, setDownloading] = useState(false);
+  return (
+    <article className="flex max-w-xl flex-col gap-4 rounded-2xl border border-black/10 bg-white/70 p-4 sm:p-5">
+      <div className="flex gap-4">
+        {/* A data-URL image keeps the SVG's ids separate from the page. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={svgDataUrl(renderTile(design.recipe, design.plan))} alt="" className="h-20 w-20 shrink-0 rounded-xl" />
+        <div className="min-w-0">
+          <h3 className="font-serif text-2xl">{design.name}</h3>
+          <p className="line-clamp-3 text-sm text-foreground/70">{design.description}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={onView} className="rounded-xl border border-black/15 bg-white px-4 py-2.5 hover:border-black/30">
+          View
+        </button>
+        <button
+          type="button"
+          disabled={downloading}
+          onClick={async () => {
+            setDownloading(true);
+            try {
+              await downloadDesign(design);
+            } finally {
+              setDownloading(false);
+            }
+          }}
+          className="rounded-xl bg-foreground px-4 py-2.5 text-background hover:opacity-90 disabled:opacity-50"
+        >
+          {downloading ? "Preparing…" : "Download"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+export function Chat({ messages, pending, creating, notice, canCreate, ready, hasDesign, onSend, onChip, onCreate, onView, onSkipToChoices }: {
   messages: Message[];
   pending: boolean;
+  creating: number | null; // the active Create stage, or null
   notice: Notice | null;
   canCreate: boolean;
   ready: boolean;
+  hasDesign: boolean;
   onSend: (text: string) => void;
   onChip: (chip: Chip) => void;
   onCreate: () => void;
+  onView: (messageId: string) => void;
   onSkipToChoices: () => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -52,18 +116,19 @@ export function Chat({ messages, pending, notice, canCreate, ready, onSend, onCh
 
   const last = messages.at(-1);
   const opening = !messages.some((m) => m.role === "user");
-  const awaitingAnswer = !pending && last?.role === "assistant";
+  const busy = pending || creating !== null;
+  const awaitingAnswer = !busy && last?.role === "assistant";
   const suggestions = awaitingAnswer ? (last.suggestions ?? []) : [];
   // Fixed chips only appear when the model was unavailable and the template asked.
   const chips = awaitingAnswer && !suggestions.length && last.topic ? chipsFor(last.topic) : [];
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, pending, revealedFor]);
+  }, [messages.length, pending, creating, revealedFor]);
 
   const send = () => {
     const text = draft.trim();
-    if (!text || pending) return;
+    if (!text || busy) return;
     onSend(text);
     setDraft("");
   };
@@ -72,7 +137,9 @@ export function Chat({ messages, pending, notice, canCreate, ready, onSend, onCh
     <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4">
       <div className="flex flex-col gap-6 pb-4">
         {messages.map((m) =>
-          m.role === "user" ? (
+          m.design ? (
+            <DesignCard key={m.id} design={m.design} onView={() => onView(m.id)} />
+          ) : m.role === "user" ? (
             <p key={m.id} className="max-w-[85%] self-end rounded-2xl bg-black/[.06] px-4 py-2.5 text-lg">
               {m.text}
             </p>
@@ -82,6 +149,8 @@ export function Chat({ messages, pending, notice, canCreate, ready, onSend, onCh
             </p>
           ),
         )}
+
+        {creating !== null && <Progress stage={creating} />}
 
         {pending && (
           <p className="flex gap-1.5 py-2" aria-label="Thinking">
@@ -126,7 +195,7 @@ export function Chat({ messages, pending, notice, canCreate, ready, onSend, onCh
                   {revealedFor === last.id ? "Hide suggestions" : "Show suggestions"}
                 </button>
               )}
-              {canCreate && <CreateButton emphasis={ready} onClick={onCreate} />}
+              {canCreate && <CreateButton emphasis={ready && !hasDesign} label={hasDesign ? "Create another" : "Create pattern"} onClick={onCreate} />}
             </div>
             {revealedFor === last.id && suggestions.length > 0 && <SuggestionRows suggestions={suggestions} onPick={onSend} />}
           </div>
@@ -164,7 +233,7 @@ export function Chat({ messages, pending, notice, canCreate, ready, onSend, onCh
           />
           <button
             type="submit"
-            disabled={!draft.trim() || pending}
+            disabled={!draft.trim() || busy}
             aria-label="Send"
             className="h-10 w-10 shrink-0 rounded-full bg-foreground text-lg text-background disabled:opacity-30"
           >

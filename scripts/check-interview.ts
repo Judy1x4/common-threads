@@ -1,6 +1,7 @@
 // Checks the conversation logic with keyword matching only (Step 5 "done when").
 // Run: npm run check:interview
-import { applyModelTurn, addUserMessage, chipsFor, currentTopic, emptyExtraction, keywordExtract, nextStep, takeTurn } from "../lib/interview";
+import { applyModelTurn, addUserMessage, chipsFor, currentTopic, emptyExtraction, keywordExtract, nextStep, oneQuestion, plainWords, takeTurn } from "../lib/interview";
+import { addDesign, applyFinish, buildDesign, rebuildDesign, replaceLatestDesign, topicsToSuggest } from "../lib/design";
 import { missingChoices, profileToRecipe } from "../lib/recipe";
 import { emptySession } from "../lib/session";
 import type { Session } from "../lib/types";
@@ -91,6 +92,39 @@ s = modelTurn(s, "blue", null, { paletteId: { value: "cool", origin: "explicit" 
 check("'ready' while topics remain falls back to the next question", currentTopic(s) === "arrangement", lastReply(s));
 s = modelTurn(s, "I love the colours", "arrangement");
 check("an unanswered required topic can be asked a second time", lastReply(s) === "Model reply?" && currentTopic(s) === "arrangement", s.interview);
+
+// Reply guards
+console.log("\nReply guards");
+check("jargon becomes everyday words", plainWords("A calm palette with small motifs.") === "A calm colour mix with small shapes.");
+check("two questions become one (the last)", oneQuestion("Lovely. Is it the sea? What colours do you remember?") === "Lovely. What colours do you remember?", oneQuestion("Lovely. Is it the sea? What colours do you remember?"));
+check("one question is left alone", oneQuestion("Long, slow waves, or small ripples?") === "Long, slow waves, or small ripples?");
+
+// 6. Create and View changes (no API call).
+console.log("\nCreate and View changes");
+s = say(emptySession(), "A quiet beach where I used to walk with my dad");
+check("after one answer, Create suggests what is missing (beach already suggested waves)", topicsToSuggest(s.profile).join(",") === "colours,arrangement", topicsToSuggest(s.profile));
+const finished = applyFinish(s.profile, {
+  ...emptyExtraction(),
+  motifs: [{ id: "circle", role: "main", origin: "explicit" }],
+  paletteId: { value: "cool", origin: "explicit" },
+  layoutId: { value: "scattered", origin: "suggested" },
+  density: { value: "high", origin: "suggested" },
+}, "m9");
+check("finish fills the gaps, marked suggested", !missingChoices(finished).length && finished.paletteId?.origin === "suggested" && finished.motifs?.origin === "suggested", finished);
+check("finish never overrides what is already known", finished.density?.value === s.profile.density?.value && finished.scene?.value === s.profile.scene?.value, finished);
+let design = buildDesign(finished, 1234, { name: "Morning Shore", description: "Soft waves at dawn." });
+s = addDesign(s, finished, design);
+check("the card joins the chat with its own snapshot", s.messages.at(-1)!.design?.name === "Morning Shore" && s.design === design);
+const warmer = { ...finished, paletteId: { value: "warm" as const, origin: "explicit" as const } };
+const changed = rebuildDesign(design, warmer);
+check("a View change keeps the seed, name, and other settings", changed.recipe.seed === 1234 && changed.name === "Morning Shore" && changed.recipe.layoutId === design.recipe.layoutId && changed.recipe.density === design.recipe.density && JSON.stringify(changed.recipe.ingredients) === JSON.stringify(design.recipe.ingredients));
+check("a palette change moves no motif", JSON.stringify(changed.plan) === JSON.stringify(design.plan));
+const firstCard = s.messages.at(-1)!.id;
+s = addDesign(s, warmer, buildDesign(warmer, 99));
+s = replaceLatestDesign(s, warmer, rebuildDesign(s.design!, { ...warmer, layoutId: { value: "grid", origin: "explicit" } }));
+check("View changes update only the latest card", s.messages.find((m) => m.id === firstCard)!.design?.recipe.paletteId === "cool" && s.messages.at(-1)!.design?.recipe.layoutId === "grid");
+design = s.design!;
+void design;
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exit(failures ? 1 : 0);

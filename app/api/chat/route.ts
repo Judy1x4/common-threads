@@ -1,15 +1,16 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { interviewTurn, ModelError } from "@/lib/model";
-import { InterviewRequestSchema } from "@/lib/schemas";
+import { finishTurn, interviewTurn, ModelError } from "@/lib/model";
+import { ChatRequestSchema } from "@/lib/schemas";
 
-// One model call per user message. The browser falls back to keyword matching
-// on any non-200 response, so errors only need a short reason.
+// One model call per user message ("interview") and one at Create ("finish").
+// The browser falls back on any non-200 response, so errors only need a short reason.
 export async function POST(request: Request) {
-  const parsed = InterviewRequestSchema.safeParse(await request.json().catch(() => null));
+  const parsed = ChatRequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid request" }, { status: 400 });
 
   try {
-    return Response.json(await interviewTurn(parsed.data));
+    const body = parsed.data;
+    return Response.json(body.mode === "finish" ? await finishTurn(body) : await interviewTurn(body));
   } catch (error) {
     const reason =
       error instanceof Anthropic.AuthenticationError ? "API key rejected"

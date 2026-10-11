@@ -16,7 +16,8 @@ export type MotifScale = (typeof MOTIF_SCALES)[number];
 export type Topic = (typeof TOPICS)[number];
 
 export type MotifRole = "main" | "accent";
-export type Phase = "INTERVIEW" | "REVIEW" | "RESULT";
+// The chat (with any result cards) or the choices form.
+export type Phase = "INTERVIEW" | "REVIEW";
 
 // Where a profile value came from: the user said it, the AI inferred it, or code filled it in.
 export type Origin = "explicit" | "suggested" | "default";
@@ -35,8 +36,16 @@ export type Profile = {
 };
 
 // An assistant message that asks about a topic carries it, plus the model's
-// example answers; without them, the chat shows that topic's fixed chips.
-export type Message = { id: string; role: "user" | "assistant"; text: string; topic?: Topic; suggestions?: string[] };
+// example answers; without them, the chat shows that topic's fixed chips. A
+// message with a design is a result card.
+export type Message = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  topic?: Topic;
+  suggestions?: string[];
+  design?: Design;
+};
 
 // What one user message says, from keyword matching or the model (same shape as
 // the Step 0 test schema). "suggested" means inferred, e.g. beach → wave.
@@ -82,12 +91,15 @@ export type Recipe = {
 export type Placement = { motifId: MotifId; x: number; y: number; rotation: number; colorRank: 1 | 2 | 3 };
 export type RenderPlan = Placement[];
 
+// A finished pattern. Result-card messages keep their own snapshot, so earlier
+// versions stay as they were.
+export type Design = { name: string; description: string; recipe: Recipe; plan: RenderPlan };
+
 export type Session = {
   messages: Message[];
   profile: Profile;
   interview: Interview;
   sampleId?: string; // set when the profile came from "Try sample"
-  currentRecipe?: Recipe;
-  previousRecipe?: Recipe;
-  renderPlan?: RenderPlan;
+  design?: Design; // the latest design
+  previousDesign?: Design; // for Undo
 };

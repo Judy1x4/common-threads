@@ -1,19 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { ChatUnavailable, requestTurn } from "@/lib/chat-client";
+import { ChatUnavailable, requestFinish, requestTurn } from "@/lib/chat-client";
+import { addDesign, applyFinish, buildDesign, CREATE_MESSAGE, rebuildDesign, replaceLatestDesign } from "@/lib/design";
 import {
   addUserMessage, answeredTopics, applyExtraction, applyModelTurn, currentTopic, keywordExtract, nextStep, takeTurn, type Chip,
 } from "@/lib/interview";
-import { profileToRecipe } from "@/lib/recipe";
-import { buildRenderPlan } from "@/lib/render";
+import { missingChoices } from "@/lib/recipe";
 import { SAMPLES } from "@/lib/samples";
 import { emptySession } from "@/lib/session";
 import type { Phase, Profile, Session } from "@/lib/types";
 import { useHydrated, useSession } from "@/lib/use-session";
 import { Chat, type Notice } from "./chat";
-import { ResultView } from "./result-view";
+import { RecipePanel } from "./recipe-panel";
 import { ReviewForm } from "./review-form";
+
+const STAGE_MS = 350; // the code stages after the model call are instant; pause so each is visible
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function withPhase(session: Session, phase: Phase): Session {
   return { ...session, interview: { ...session.interview, phase } };
@@ -35,14 +38,17 @@ export default function Studio() {
   const hydrated = useHydrated();
   const [session, update] = useSession();
   const [pending, setPending] = useState(false);
+  const [creating, setCreating] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<string | null>(null); // message id of the open result card
   const [notice, setNotice] = useState<Notice | null>(null);
   const { phase } = session.interview;
   const sample = SAMPLES.find((s) => s.id === session.sampleId);
 
   const startOver = () => {
-    const hasWork = session.messages.some((m) => m.role === "user") || session.profile.motifs || session.currentRecipe;
+    const hasWork = session.messages.some((m) => m.role === "user") || session.profile.motifs || session.design;
     if (!hasWork || window.confirm("Start a new chat? Your current design will be cleared.")) {
       setNotice(null);
+      setViewing(null);
       update(() => emptySession());
     }
   };
@@ -55,7 +61,6 @@ export default function Studio() {
 
   const changeProfile = (profile: Profile) => update((s) => ({ ...s, profile }));
 
-  // Step 5 reads answers with keyword matching; Step 6 puts the model call here.
   // Ask the model about the latest user message; if it is unavailable, read the
   // message with keyword matching instead and offer a retry.
   const answer = async (sent: Session, text: string, userId: string) => {
@@ -97,12 +102,53 @@ export default function Studio() {
   const choose = (chip: Chip) => update((s) => takeTurn(s, chip.label, chip.extraction));
   const toReview = () => update((s) => withPhase(s, "REVIEW"));
 
-  const create = () =>
+  // Create pattern: the model suggests anything missing and names the pattern;
+  // code builds it. Without the model, code names it; if a required choice is
+  // still missing, the review form opens.
+  const createPattern = async () => {
+    if (pending || creating !== null) return;
+    let sent = session;
+    let userId = "";
     update((s) => {
-      const seed = SAMPLES.find((x) => x.id === s.sampleId)?.seed ?? Math.floor(Math.random() * 1_000_000);
-      const recipe = profileToRecipe(s.profile, seed);
-      return { ...withPhase(s, "RESULT"), previousRecipe: s.currentRecipe, currentRecipe: recipe, renderPlan: buildRenderPlan(recipe) };
+      [sent, userId] = addUserMessage(withPhase(s, "INTERVIEW"), CREATE_MESSAGE);
+      return sent;
     });
+    setNotice(null);
+    setCreating(0);
+
+    let profile = sent.profile;
+    let words: { name: string; description: string } | undefined;
+    try {
+      const finish = await requestFinish(sent);
+      profile = applyFinish(sent.profile, finish.extraction, userId);
+      words = finish;
+    } catch (error) {
+      setNotice({ reason: error instanceof ChatUnavailable ? error.message : "error" });
+    }
+
+    if (missingChoices(profile).length) {
+      setCreating(null);
+      update((s) => ({ ...withPhase(s, "REVIEW"), profile }));
+      return;
+    }
+    const seed = SAMPLES.find((x) => x.id === sent.sampleId)?.seed ?? Math.floor(Math.random() * 1_000_000);
+    const design = buildDesign(profile, seed, words);
+    for (let stage = 1; stage < 5; stage++) {
+      setCreating(stage);
+      await sleep(STAGE_MS);
+    }
+    setCreating(null);
+    update((s) => (s.messages.some((m) => m.id === userId) ? addDesign(s, profile, design) : s));
+  };
+
+  // A change in the View panel rebuilds the latest design with the same seed.
+  const changeDesign = (profile: Profile) => {
+    if (missingChoices(profile).length) return;
+    update((s) => (s.design ? replaceLatestDesign(s, profile, rebuildDesign(s.design, profile)) : s));
+  };
+
+  const viewed = session.messages.find((m) => m.id === viewing)?.design;
+  const latestCardId = session.messages.findLast((m) => m.design)?.id;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 pb-16">
@@ -118,16 +164,9 @@ export default function Studio() {
         </nav>
       </header>
 
-      {!hydrated ? null : phase === "RESULT" && session.currentRecipe && session.renderPlan ? (
-        <ResultView
-          profile={session.profile}
-          recipe={session.currentRecipe}
-          plan={session.renderPlan}
-          onChangeChoices={() => update((s) => withPhase(s, "REVIEW"))}
-        />
-      ) : phase === "REVIEW" || phase === "RESULT" ? (
+      {!hydrated ? null : phase === "REVIEW" ? (
         <div className="flex flex-col gap-3">
-          <ReviewForm profile={session.profile} sampleName={sample?.name} onChange={changeProfile} onCreate={create} />
+          <ReviewForm profile={session.profile} sampleName={sample?.name} onChange={changeProfile} onCreate={createPattern} />
           <button
             type="button"
             onClick={() => update((s) => withPhase(s, "INTERVIEW"))}
@@ -142,15 +181,32 @@ export default function Studio() {
           <Chat
             messages={session.messages}
             pending={pending}
+            creating={creating}
             notice={notice}
-            canCreate={answeredTopics(session.profile).length > 0}
+            canCreate={answeredTopics(session.profile).length > 0 || !!session.design}
             ready={nextStep(session).kind === "ready"}
+            hasDesign={!!session.design}
             onSend={send}
             onChip={choose}
-            onCreate={toReview}
+            onCreate={createPattern}
+            onView={setViewing}
             onSkipToChoices={toReview}
           />
         </>
+      )}
+
+      {hydrated && viewed && (
+        <RecipePanel
+          design={viewed}
+          profile={session.profile}
+          editable={viewing === latestCardId}
+          onChange={changeDesign}
+          onChangeChoices={() => {
+            setViewing(null);
+            toReview();
+          }}
+          onClose={() => setViewing(null)}
+        />
       )}
     </div>
   );

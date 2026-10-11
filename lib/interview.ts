@@ -229,6 +229,31 @@ export function applyExtraction(session: Session, e: Extraction, userMessageId: 
   return withReply(session, profile, interview, templateReply(e, nextStep({ profile, interview })));
 }
 
+// The prompt asks for everyday words; this catches the occasional slip.
+const PLAIN_WORDS: Record<string, string> = {
+  palette: "colour mix", palettes: "colour mixes", motif: "shape", motifs: "shapes",
+  layout: "arrangement", layouts: "arrangements", density: "fullness",
+};
+export function plainWords(text: string): string {
+  return text.replace(/\b(palettes?|motifs?|layouts?|density)\b/gi, (word) => {
+    const plain = PLAIN_WORDS[word.toLowerCase()];
+    return word[0] === word[0].toUpperCase() ? plain[0].toUpperCase() + plain.slice(1) : plain;
+  });
+}
+
+// One question per reply: when the model asks more than one, keep its other
+// sentences and only the last question, which is the one about the open topic.
+export function oneQuestion(text: string): string {
+  const sentences = text.match(/[^.!?]+[.!?]+["”’)]*\s*/g) ?? [text];
+  const lastQuestion = sentences.findLastIndex((x) => x.trim().replace(/["”’)]+$/, "").endsWith("?"));
+  return sentences
+    .filter((x, i) => i === lastQuestion || !x.trim().replace(/["”’)]+$/, "").endsWith("?"))
+    .join("")
+    .trim();
+}
+
+export const polishReply = (text: string) => oneQuestion(plainWords(text));
+
 // Model path: keep the model's reply if it asks about a topic that is still open
 // after the merge (or asks nothing when nothing is open); otherwise use the template.
 export function applyModelTurn(session: Session, turn: ChatTurn, userMessageId: string): Session {
@@ -237,21 +262,30 @@ export function applyModelTurn(session: Session, turn: ChatTurn, userMessageId: 
   const step = nextStep({ profile, interview });
   const fits = turn.askedTopic ? openTopics({ profile, interview }).includes(turn.askedTopic) : step.kind === "ready";
   const reply = fits
-    ? { text: turn.reply, topic: turn.askedTopic ?? undefined, suggestions: turn.askedTopic ? turn.suggestions.slice(0, 3) : [] }
+    ? {
+        text: polishReply(turn.reply),
+        topic: turn.askedTopic ?? undefined,
+        suggestions: turn.askedTopic ? turn.suggestions.slice(0, 3).map(plainWords) : [],
+      }
     : step.kind === "ready"
       ? { text: `Lovely. ${READY_MESSAGE}` } // the model asked about a closed topic; code says ready
       : templateReply(e, step);
   return withReply(session, profile, interview, reply);
 }
 
-// What /api/chat needs: recent history from the first user message, the topics
-// open before the latest message, and the current profile.
-export function interviewRequest(session: Session): InterviewRequest {
+// The last 12 messages, starting with a user message, as /api/chat expects.
+export function recentHistory(session: Session): InterviewRequest["messages"] {
   const firstUser = session.messages.findIndex((m) => m.role === "user");
   const history = session.messages.slice(firstUser).slice(-12).map((m) => ({ role: m.role, text: m.text.slice(0, 1000) }));
+  return history.slice(history.findIndex((m) => m.role === "user"));
+}
+
+// What /api/chat needs: recent history, the topics open before the latest
+// message, and the current profile.
+export function interviewRequest(session: Session): InterviewRequest {
   return {
     mode: "interview",
-    messages: history.slice(history.findIndex((m) => m.role === "user")),
+    messages: recentHistory(session),
     profile: session.profile,
     openTopics: openTopics(session),
     questionCount: session.interview.questionCount,
