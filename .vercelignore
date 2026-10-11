@@ -1,0 +1,8 @@
+# Never upload local secrets or large local-only folders to Vercel
+.env*
+!.env.example
+node_modules
+.next
+assets/everyhuman-example-ui
+assets/samples
+assets/demo

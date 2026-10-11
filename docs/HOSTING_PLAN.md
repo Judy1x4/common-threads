@@ -4,6 +4,8 @@
 
 **Recommendation:** deploy to **Vercel** from the GitHub repo (free Hobby plan), and keep an **ngrok** tunnel from the laptop as a demo-day backup.
 
+**Status (11 Oct 2026): live at <https://common-threads-sigma.vercel.app>.** Vercel project `judy-9698/common-threads`, connected to the GitHub repo, so every push to `main` redeploys. Production secrets: `ANTHROPIC_API_KEY` (the capped workspace key) and `ANTHROPIC_MODEL=claude-haiku-5-5`. `.vercelignore` keeps `.env*` and local-only asset folders out of CLI uploads. Note: `vercel link` appends a `VERCEL_OIDC_TOKEN` to `.env.local`; it is harmless and stays git-ignored.
+
 ## 1. Options
 
 | Option | Public link | Setup | Hosting cost | Decision |
