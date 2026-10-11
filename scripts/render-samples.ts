@@ -13,7 +13,7 @@ mkdirSync(out, { recursive: true });
 for (const sample of SAMPLES) {
   const recipe = profileToRecipe(sample.profile, sample.seed);
   const svg = renderRepeat(recipe, buildRenderPlan(recipe), { showTileEdges: process.argv.includes("--edges") });
-  writeFileSync(`${out}/${sample.id}.png`, new Resvg(svg, { fitTo: { mode: "width", value: 768 } }).render().asPng());
+  writeFileSync(`${out}/${sample.id}.png`, new Resvg(svg, { fitTo: { mode: "width", value: 1536 } }).render().asPng());
   console.log(`${sample.id}: ${recipe.ingredients.map((i) => `${i.id}×${i.count}`).join(" ")}`);
 }
 console.log(`Wrote ${SAMPLES.length} PNGs to ${out}/`);

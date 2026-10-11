@@ -24,7 +24,7 @@ export const MOTIFS: Record<MotifId, Motif> = {
   dot: { id: "dot", label: "Dots", tags: ["small", "accent", "spots", "rain", "pebbles"], rotations: "any", path: MOTIF_PATHS.dot },
   stripe: { id: "stripe", label: "Stripes", tags: ["linear", "rhythmic", "lines"], rotations: [0, 90], path: MOTIF_PATHS.stripe },
   arch: { id: "arch", label: "Arches", tags: ["curved", "structured", "doorway", "rainbow", "bridge"], rotations: [0, 180], path: MOTIF_PATHS.arch },
-  leaf: { id: "leaf", label: "Leaves", tags: ["plant", "organic", "nature", "garden", "forest"], rotations: [0, 180], path: MOTIF_PATHS.leaf },
+  leaf: { id: "leaf", label: "Leaves", tags: ["plant", "organic", "nature", "garden", "forest"], rotations: [0, 90, 180, 270], path: MOTIF_PATHS.leaf },
 };
 
 // Inks are ordered by contrast against the background, so colour rank 1 is

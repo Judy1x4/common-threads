@@ -126,7 +126,7 @@ Prepare six original motifs in a consistent drawing style.
 | `dot` | Three filled dots | `dot-1` | Small, accent | Any |
 | `stripe` | Three short parallel lines | `stripe-3` | Linear, rhythmic | 0°, 90° |
 | `arch` | Double curved arch | `arch-3` | Curved, structured | 0°, 180° |
-| `leaf` | Simple leaf outline | `leaf-1` | Plant, organic | 0°, 180° |
+| `leaf` | Simple leaf outline | `leaf-1` | Plant, organic | 0°, 90°, 180°, 270° |
 
 The chosen set repeats lines (double wave, ring, and arch; three stripes and dots), which ties the drawings together and keeps them readable at small sizes.
 
